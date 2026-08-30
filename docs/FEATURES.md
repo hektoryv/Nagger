@@ -12,7 +12,8 @@ that adds, renames, or removes a user-facing control.** "User-facing control" me
 anything a real tap/screen touches — a button, a field, a menu item, a section of a
 screen — not internal refactors.
 
-Last updated: after the Today-screen/times-per-week bug-fix round (commit `015a7b6`).
+Last updated: after the scheduling-persistence / FAB-unification / day-shape round
+(commit history around `9000053` and the fixes that follow it).
 
 ---
 
@@ -31,21 +32,32 @@ Last updated: after the Today-screen/times-per-week bug-fix round (commit `015a7
   - **Restore backup** — load habits + log + reminder time from a chosen JSON file.
   - **Add class schedule link** / **Class schedule link** — opens the planner link
     dialog (see below).
+  - **Sync class schedule now** — only shown once a link is saved; re-fetches and
+    re-parses the ICS feed immediately (also happens automatically on app open and
+    nightly — see "How the schedule stays current" below).
+  - **Manage tasks** — opens the full-screen task list (see below).
+  - **Day shape** — opens a dialog to change when the planner's day starts, when
+    dinner is, and when wind-down starts (see below).
+  - **Recalculate schedule** — forgets every not-yet-past one-off task's placement so
+    it gets freshly re-decided on the next view. See "How the schedule stays current".
+- One shared **"Add"** floating action button, present on both tabs, offering:
+  - **Add check-in** → the habit dialog.
+  - **Add task** → the task dialog.
+  Both options are available from either tab — there's no longer a tab-dependent FAB.
 
 ## Today tab (TodayScreen)
 
 - Header card: status line + subtext, both driven off whether there are any habits
   and/or any scheduled blocks today.
 - **Today's schedule** section — today's classes and tasks from the planner, in time
-  order. Tap a row → the shared scheduled-block detail dialog (see below).
+  order. A task row has a checkbox (marks that occurrence done/not-done). Tap a row →
+  the shared scheduled-block detail dialog (see below).
 - **Due today** — habit rows with a checkbox to mark done; tap the row → habit detail
   screen.
 - **Done today** — habit rows with a checkbox to un-mark; tap → habit detail screen.
 - **Coming up** — active habits not due or done today; tap → habit detail screen.
 - **Paused** — paused habits; tap → habit detail screen.
 - **Finished** — completed "until done" habits; tap → habit detail screen.
-- FAB (+) — opens the **habit** dialog (create a new check-in). Note this is a
-  different dialog/data type than the Calendar tab's FAB — see Known gaps.
 
 ## Calendar tab (CalendarScreen)
 
@@ -56,12 +68,12 @@ Last updated: after the Today-screen/times-per-week bug-fix round (commit `015a7
   day → day-detail dialog (lists habits due/done/missed that day; checkbox to toggle,
   disabled for future dates).
 - Week timeline: an hour-by-hour (06:00–24:00) grid, one column per day, showing every
-  `ScheduledBlock` for that day positioned by actual start time/duration. Locked
-  blocks (classes, by default) get a **red border**; flexible blocks (tasks) get a
-  neutral outline. Tap any block → the shared scheduled-block detail dialog.
-- Legend: Done/Due/Ahead/Missed color key — for the habit dots only, not the timeline.
-- FAB (+) — opens the **task** dialog (create a new planner task). Different
-  dialog/data type than the Today tab's FAB — see Known gaps.
+  `ScheduledBlock` for that day positioned by actual start time/duration, plus shaded
+  dinner and wind-down bands (from the current day shape). Locked blocks (classes, by
+  default) get a **red border**; flexible blocks (tasks) get a neutral outline. Tap any
+  block → the shared scheduled-block detail dialog.
+- Legend: two rows — Done/Due/Ahead/Missed (habit dots), and Locked/Flexible/Dinner/
+  Wind-down (timeline blocks and bands).
 
 ## Habit dialog (create/edit a check-in)
 
@@ -71,22 +83,48 @@ today/tomorrow toggle for new habits), **Weekdays** (multi-select chips),
 it" toggle (hidden for Until done); "count an amount" toggle + unit text field; an
 8-color picker. Save / Cancel / Delete (edit only, with a confirm sub-dialog).
 
-## Task dialog (create a task)
+## Task dialog (create or edit a task)
 
 Title; duration as separate **Hours** and **Minutes** number fields; repeat choice —
 **One-and-done**, **Daily**, or **A few times a week** (with a 1–7 count field); a
-**Hard deadline** toggle that reveals an Android date picker. Save / Cancel.
+**Hard deadline** toggle that reveals an Android date picker. Save / Cancel, and when
+editing an existing task, **Delete** (with a confirm sub-dialog). Editing an existing
+task clears its current placement so it gets re-decided with the new duration/
+deadline — see "How the schedule stays current".
+
+## Manage tasks screen (⋮ menu → Manage tasks)
+
+Full-screen list of every task, placed or not — the only place an unplaced task (no
+room for it yet) can be reached at all. Tap a row → edit (task dialog). FAB (+) →
+create.
 
 ## Scheduled block detail dialog (tap any class or task, either tab)
 
 Shows: Type (Class/Task), Day, Time span, Duration, Location (classes only, if
-present), Status (Locked / Flexible / Skipped, in plain English). **Delete task**
-button, tasks only. Close.
+present), Deadline (tasks only, if set), Status (Locked / Flexible / Skipped, in plain
+English), Done (tasks only, Yes/Not yet). Buttons shown depending on context:
+- **Mark done / Mark not done** — tasks only.
+- **Move to a specific time** — one-off (not recurring) tasks only, and only once
+  they've actually been placed. Opens the Android time picker; keeps the same day,
+  changes the time. See "How the schedule stays current" for what this does and does
+  not survive.
+- **Make flexible / Skip / Reset to locked** — classes only, per occurrence; the rest
+  of that recurring class is unaffected.
+- **Delete task** — tasks only.
+
+## Day shape dialog (⋮ menu → Day shape)
+
+Four tap-to-pick times (each opens the Android time picker): **Day starts**,
+**Dinner starts**, **Dinner ends**, **Wind-down starts**. These are exactly what the
+placer avoids scheduling flexible tasks over/before/after. Save validates the order
+(day start < dinner < wind-down) and shows an inline error rather than saving if it
+doesn't hold; Cancel discards changes.
 
 ## Planner link dialog (⋮ menu → class schedule link)
 
-ICS URL text field; explanatory text; "Syncing…" or an error message inline. Save &
-sync (persists the URL and immediately fetches+parses) / Cancel.
+ICS URL text field; explanatory text; "Syncing…" or an error message inline; **Remove
+link** button (only shown once a link exists — clears the link and any classes from
+it). Save & sync (persists the URL and immediately fetches+parses) / Cancel.
 
 ## Habit detail screen (tap any habit, either tab)
 
@@ -99,40 +137,56 @@ entries).
 
 ## Home screen widget
 
-Today's habit list: title, color dot, checkbox (tap to mark done). Tapping the header
-opens the app. Habit-only.
+Today's schedule rows (classes/tasks, read-only, colored dot instead of a checkbox,
+tap opens the app) followed by today's habit rows (title, color dot, checkbox to mark
+done straight from the home screen), capped at 6 rows total. Tapping the header opens
+the app. Uses the same day shape and the same persisted task placements as the app, so
+it won't show a one-off task somewhere different than the app does.
+
+## How the schedule stays current
+
+- **The ICS feed** re-fetches on app open (if a link is saved), on demand via "Sync
+  class schedule now", and once nightly piggybacked on the existing habit check-in
+  alarm.
+- **Where a task lands** is decided once and then stays put, rather than being
+  recomputed from scratch every time a week is viewed — this is what fixed a bug where
+  a one-off task could appear on an already-past day and on every future week at once.
+  A one-off task's placement is only decided (or re-decided) when something asks to
+  view a week that could contain it — there's no separate nightly "replan" pass beyond
+  the ICS re-sync above, so an unplaced task only gets a fresh attempt once the app (or
+  widget) is actually asked about that day. It is never placed on a day before today.
+  A recurring task (daily / times-a-week) is still recomputed fresh every time its week
+  is viewed — that's correct, since it's supposed to happen again each week.
+- **Recalculate schedule** (menu item) clears every one-off task's not-yet-past
+  placement, including one set with "Move to a specific time" — there's currently no
+  way to tell an auto-placed occurrence apart from a manually moved one, so Recalculate
+  discards both and lets them be freshly re-decided.
+- **Editing a task** (duration, deadline, etc.) clears its existing placement for the
+  same reason — the old slot may no longer be the right size or before/after the new
+  deadline.
+- **Moving a task manually** doesn't check for overlaps with other blocks — it trusts
+  the time you pick, the same way a class's "Make flexible"/"Skip" trusts the choice
+  you make.
 
 ---
 
 ## Known gaps (confirmed by reading the code, not memory — check off as fixed)
 
-- **Task deadline is invisible after creation.** `PlannerTask.deadline` is saved and
-  used by `Placer` to prioritize placement, but `ScheduledBlock` doesn't carry it, so
-  neither the scheduled-block detail dialog nor the Today's-schedule row ever show it.
-  This is what "the hard deadline feature is gone" was — the data isn't lost, but
-  there is genuinely nowhere in the UI it appears.
-- **No way to edit a task once saved** — only delete, and only reachable by tapping a
-  *placed* occurrence. A task that never got placed anywhere this week (no room) has
-  no dialog that can reach it at all — it's effectively invisible and undeletable
-  until it happens to get placed.
-- **No skip/make-flexible control on a class instance.** The spec's "tap a class
-  instance → Skip / Self Study" and the `LockState`/`PlannerOverrides` data model
-  exist and work, but no UI sets them — every event is permanently `LOCKED`.
-- **`DayShape` (day-start 08:00, dinner 18:00–19:00, wind-down 22:00) is invisible.**
-  It's why the placer avoids ~17:00–19:00, but nothing in the UI shows the dinner
-  window, wind-down cutoff, or lets you change them — the avoidance looks like
-  unexplained behavior rather than a deliberate rule.
-- **No nightly auto-replan or missed-task carryover.** The spec called for both;
-  neither exists. Sync only happens when you save the link or open the app.
-- **No manual "recalculate" button independent of editing the feed URL**, and no way
-  to clear/remove a saved feed link (only Save & Cancel in the link dialog).
-- **The Today and Calendar tabs' "+" buttons open unrelated dialogs** (habit vs.
-  task) with no visual cue they're different kinds of things — worth a UX pass, not
-  necessarily a bug.
-- **Widget doesn't show planner tasks/classes**, only habits.
-
-## Explicitly out of scope for now (not gaps, deferred on purpose)
-
-- Interpersonal/shared scheduling (seeing when two people are both free).
-- Per-habit reminder times (one global check-in time for all habits).
-- Multiple entries per day, notes on an entry, snooze durations other than 1 hour.
+- **"Move to a specific time" only changes the time of day, not the date**, and only
+  exists for one-off tasks — a recurring task's occurrence has no persisted slot to
+  move at all (see "How the schedule stays current"). The original request was a
+  long-press-and-drag gesture directly on the block; this is a tap-to-open-dialog
+  substitute chosen because a live drag gesture in the Compose timeline canvas can't be
+  verified without a device, and a half-working drag would be worse than this. Revisit
+  if a real drag interaction is wanted.
+- **Dinner/wind-down aren't adjustable by long-pressing them directly in the week
+  view**, as originally asked for — they're a global setting, changed instead through
+  the menu-based **Day shape** dialog (a per-day-instance long-press would be a
+  confusing way to change something that isn't per-day anyway, but if the intent was
+  specifically "hold the shaded band to nudge it," that's not what this does).
+- **`Placer` is still a pure, one-week-at-a-time function** (see `Placer.kt`'s doc
+  comment) — `PlannerScheduler` wraps it with persisted one-off-task placement to fix
+  the cross-week duplication bug, but a recurring task's exact time on a given day can
+  still shift if you view the same week again after adding/removing something else
+  that week (expected — only the day, driven by the weekly quota, is meant to be
+  stable; the exact minute isn't promised).

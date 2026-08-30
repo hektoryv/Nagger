@@ -57,6 +57,7 @@ import com.example.nag.planner.DayShape
 import com.example.nag.planner.LockState
 import com.example.nag.planner.OccurrenceKey
 import com.example.nag.planner.ScheduledBlock
+import com.example.nag.planner.TaskRecurrence
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
@@ -140,10 +141,24 @@ fun CalendarScreen(
                     state.setTaskOccurrenceDone(block.occurrenceKey, block.occurrenceKey !in state.plannerCompletions)
                     selectedBlock = null
                 }
+            } else null,
+            onMove = if (isMovableTask(state, block)) {
+                { newStart ->
+                    state.moveTaskAssignment(block.occurrenceKey.sourceId, newStart)
+                    selectedBlock = null
+                }
             } else null
         )
     }
 }
+
+/**
+ * Only a one-off task has a persisted placement to move — a recurring task's
+ * occurrence is recomputed fresh every week, so there's nothing to pin yet.
+ */
+private fun isMovableTask(state: AppState, block: ScheduledBlock): Boolean =
+    block.kind == BlockKind.TASK &&
+        state.plannerTasks.firstOrNull { it.id == block.occurrenceKey.sourceId }?.recurrence == TaskRecurrence.None
 
 @Composable
 private fun StatsStrip(state: AppState, today: LocalDate, onOpen: (Habit) -> Unit) {
@@ -233,8 +248,11 @@ private fun WeekGrid(
     onDayClick: (LocalDate) -> Unit,
     onBlockClick: (ScheduledBlock) -> Unit
 ) {
-    val schedule = remember(state.plannerEvents, state.plannerTasks, state.plannerOverrides, weekStart) {
-        state.plannerSchedule(weekStart)
+    val schedule = remember(
+        state.plannerEvents, state.plannerTasks, state.plannerOverrides, state.plannerTaskAssignments,
+        state.dayShape, weekStart, today
+    ) {
+        state.plannerSchedule(weekStart, today)
     }
 
     Column(Modifier.padding(horizontal = 6.dp)) {

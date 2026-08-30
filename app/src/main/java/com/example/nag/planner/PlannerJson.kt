@@ -132,4 +132,41 @@ object PlannerJson {
     private fun occurrenceKeyFromJson(o: JSONObject): OccurrenceKey? = runCatching {
         OccurrenceKey(o.getString("sourceId"), LocalDate.parse(o.getString("date")))
     }.getOrNull()
+
+    // ---------- task assignments (where a one-off task was already placed) ----------
+
+    fun scheduledBlockToJson(block: ScheduledBlock): JSONObject = JSONObject().apply {
+        put("sourceId", block.occurrenceKey.sourceId)
+        put("date", block.occurrenceKey.date.toString())
+        put("kind", block.kind.name)
+        put("title", block.title)
+        put("start", block.start.toString())
+        put("end", block.end.toString())
+        put("lockState", block.lockState.name)
+        put("location", block.location ?: JSONObject.NULL)
+        put("deadline", block.deadline?.toString() ?: JSONObject.NULL)
+    }
+
+    fun scheduledBlockFromJson(o: JSONObject): ScheduledBlock? = runCatching {
+        ScheduledBlock(
+            occurrenceKey = OccurrenceKey(o.getString("sourceId"), LocalDate.parse(o.getString("date"))),
+            kind = BlockKind.valueOf(o.getString("kind")),
+            title = o.getString("title"),
+            start = LocalDateTime.parse(o.getString("start")),
+            end = LocalDateTime.parse(o.getString("end")),
+            lockState = LockState.valueOf(o.getString("lockState")),
+            location = if (o.isNull("location")) null else o.optString("location").ifBlank { null },
+            deadline = if (o.isNull("deadline")) null else o.optString("deadline").ifBlank { null }?.let(LocalDate::parse)
+        )
+    }.getOrNull()
+
+    /** Keyed by task id — a one-off task has at most one assignment. */
+    fun taskAssignmentsToString(assignments: Map<String, ScheduledBlock>): String =
+        JSONArray().apply { assignments.values.forEach { put(scheduledBlockToJson(it)) } }.toString()
+
+    fun taskAssignmentsFromString(raw: String): Map<String, ScheduledBlock> = runCatching {
+        val array = JSONArray(raw)
+        (0 until array.length()).mapNotNull { i -> scheduledBlockFromJson(array.getJSONObject(i)) }
+            .associateBy { it.occurrenceKey.sourceId }
+    }.getOrDefault(emptyMap())
 }

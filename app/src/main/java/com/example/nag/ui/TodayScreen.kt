@@ -38,6 +38,7 @@ import com.example.nag.data.habitColorArgb
 import com.example.nag.logic.Schedule
 import com.example.nag.planner.BlockKind
 import com.example.nag.planner.ScheduledBlock
+import com.example.nag.planner.TaskRecurrence
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -181,10 +182,24 @@ fun TodayScreen(
                     state.setTaskOccurrenceDone(block.occurrenceKey, block.occurrenceKey !in state.plannerCompletions)
                     selectedBlock = null
                 }
+            } else null,
+            onMove = if (isMovableTask(state, block)) {
+                { newStart ->
+                    state.moveTaskAssignment(block.occurrenceKey.sourceId, newStart)
+                    selectedBlock = null
+                }
             } else null
         )
     }
 }
+
+/**
+ * Only a one-off task has a persisted placement to move — a recurring task's
+ * occurrence is recomputed fresh every week, so there's nothing to pin yet.
+ */
+private fun isMovableTask(state: AppState, block: ScheduledBlock): Boolean =
+    block.kind == BlockKind.TASK &&
+        state.plannerTasks.firstOrNull { it.id == block.occurrenceKey.sourceId }?.recurrence == TaskRecurrence.None
 
 @Composable
 private fun HabitRow(

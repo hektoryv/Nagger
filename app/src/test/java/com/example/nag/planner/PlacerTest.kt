@@ -147,6 +147,28 @@ class PlacerTest {
     }
 
     @Test
+    fun `a one-off task is never placed before minDate`() {
+        val task = PlannerTask(id = "t1", title = "Insurance", durationMinutes = 60)
+        val wednesday = monday.plusDays(2)
+
+        val result = Placer.place(monday, emptyList(), listOf(task), PlannerOverrides(), dayShape, minDate = wednesday)
+
+        val block = result.single()
+        assertTrue(block.start.toLocalDate() >= wednesday)
+    }
+
+    @Test
+    fun `a recurring task can still land before minDate — only one-off tasks are held back`() {
+        val task = PlannerTask(id = "t1", title = "Training", durationMinutes = 30, recurrence = TaskRecurrence.Daily)
+        val wednesday = monday.plusDays(2)
+
+        val result = Placer.place(monday, emptyList(), listOf(task), PlannerOverrides(), dayShape, minDate = wednesday)
+
+        assertEquals(7, result.size)
+        assertTrue(result.any { it.start.toLocalDate() < wednesday })
+    }
+
+    @Test
     fun `a times-per-week task never gets placed twice on the same day`() {
         val task = PlannerTask(
             id = "t1",

@@ -18,6 +18,14 @@ import java.time.LocalDateTime
  * Overrides are only consulted for events here — a task occurrence doesn't exist to be
  * locked or skipped until something has placed it once, which needs task-editing UI
  * this app doesn't have yet.
+ *
+ * This function is pure and stateless: called again with the same inputs it makes the
+ * same decision. That's deliberate for a single week, but it means a one-off task has
+ * no memory of which week it already landed in if this is called once per week by
+ * several independent callers — see [PlannerScheduler], which wraps this with a
+ * persisted record of where each one-off task has already been placed, and passes
+ * [minDate] so a task being placed for the first time is never dropped onto a day
+ * that's already passed.
  */
 object Placer {
 
@@ -26,7 +34,8 @@ object Placer {
         events: List<PlannerEvent>,
         tasks: List<PlannerTask>,
         overrides: PlannerOverrides,
-        dayShape: DayShape
+        dayShape: DayShape,
+        minDate: LocalDate = weekStart
     ): List<ScheduledBlock> {
         val weekDays = (0 until 7).map { weekStart.plusDays(it.toLong()) }
 
@@ -52,6 +61,11 @@ object Placer {
             val iterator = remaining.iterator()
             while (iterator.hasNext()) {
                 val task = iterator.next()
+                // Only a one-off task's single occurrence needs to stay off days that
+                // have already passed — a recurring task's occurrence on a past day of
+                // the week being viewed is still meaningful history, not a decision to
+                // avoid. See PlannerScheduler for why this matters.
+                if (task.recurrence == TaskRecurrence.None && day < minDate) continue
                 val usedDays = usedDaysByTask.getOrPut(task.id) { mutableSetOf() }
                 if (day in usedDays) continue
 

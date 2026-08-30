@@ -17,9 +17,8 @@ import com.example.nag.logic.Schedule
 import com.example.nag.notify.ActionReceiver
 import com.example.nag.notify.Scheduler
 import com.example.nag.planner.BlockKind
-import com.example.nag.planner.DayShape
-import com.example.nag.planner.Placer
 import com.example.nag.planner.PlannerOverrides
+import com.example.nag.planner.PlannerScheduler
 import com.example.nag.planner.PlannerStore
 import com.example.nag.planner.ScheduledBlock
 import java.time.DayOfWeek
@@ -103,13 +102,18 @@ class NagWidget : AppWidgetProvider() {
             return views
         }
 
-        /** Today's classes and tasks, read-only here — no per-instance overrides UI on a widget. */
+        /**
+         * Today's classes and tasks, read-only here — no per-instance overrides UI on a
+         * widget. Goes through the same [PlannerScheduler] the app uses so a one-off
+         * task already placed by the app doesn't get independently re-decided here.
+         */
         private fun todaySchedule(context: Context, today: LocalDate): List<ScheduledBlock> {
             val weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
             val events = PlannerStore.loadEvents(context)
             val tasks = PlannerStore.loadTasks(context)
             val overrides = PlannerStore.loadOverrides(context)
-            return Placer.place(weekStart, events, tasks, PlannerOverrides(overrides), DayShape())
+            val dayShape = PlannerStore.loadDayShape(context)
+            return PlannerScheduler.schedule(context, weekStart, today, events, tasks, PlannerOverrides(overrides), dayShape)
                 .filter { it.start.toLocalDate() == today }
                 .sortedBy { it.start }
         }

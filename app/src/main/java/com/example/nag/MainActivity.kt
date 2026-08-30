@@ -15,6 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -53,6 +54,7 @@ import com.example.nag.notify.Scheduler
 import com.example.nag.ui.AmountDialog
 import com.example.nag.ui.AppState
 import com.example.nag.ui.CalendarScreen
+import com.example.nag.ui.DayShapeDialog
 import com.example.nag.ui.DetailScreen
 import com.example.nag.ui.HabitDialog
 import com.example.nag.ui.PlannerLinkDialog
@@ -118,6 +120,7 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
     var plannerLinkOpen by remember { mutableStateOf(false) }
     var taskCreating by remember { mutableStateOf(false) }
     var tasksScreenOpen by remember { mutableStateOf(false) }
+    var dayShapeOpen by remember { mutableStateOf(false) }
 
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -277,6 +280,20 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
                                 tasksScreenOpen = true
                             }
                         )
+                        DropdownMenuItem(
+                            text = { Text("Day shape") },
+                            onClick = {
+                                menuOpen = false
+                                dayShapeOpen = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Recalculate schedule") },
+                            onClick = {
+                                menuOpen = false
+                                state.recalculatePlanner(today)
+                            }
+                        )
                     }
                 }
             )
@@ -298,17 +315,31 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
             }
         },
         floatingActionButton = {
-            when (tab) {
-                Tab.TODAY -> ExtendedFloatingActionButton(
-                    onClick = { creating = true },
+            // Same choice on both tabs — the Today screen now shows planner tasks too,
+            // so "add task" belongs here just as much as "add check-in" does.
+            var fabMenuOpen by remember { mutableStateOf(false) }
+            Box {
+                ExtendedFloatingActionButton(
+                    onClick = { fabMenuOpen = true },
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Add check-in") }
+                    text = { Text("Add") }
                 )
-                Tab.CALENDAR -> ExtendedFloatingActionButton(
-                    onClick = { taskCreating = true },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Add task") }
-                )
+                DropdownMenu(expanded = fabMenuOpen, onDismissRequest = { fabMenuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Add check-in") },
+                        onClick = {
+                            fabMenuOpen = false
+                            creating = true
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add task") },
+                        onClick = {
+                            fabMenuOpen = false
+                            taskCreating = true
+                        }
+                    )
+                }
             }
         }
     ) { padding ->
@@ -357,6 +388,17 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
             onSave = {
                 taskCreating = false
                 state.upsertTask(it)
+            }
+        )
+    }
+
+    if (dayShapeOpen) {
+        DayShapeDialog(
+            existing = state.dayShape,
+            onDismiss = { dayShapeOpen = false },
+            onSave = {
+                dayShapeOpen = false
+                state.setDayShape(it)
             }
         )
     }

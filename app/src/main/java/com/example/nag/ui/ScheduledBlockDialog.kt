@@ -1,5 +1,6 @@
 package com.example.nag.ui
 
+import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,11 +15,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.nag.planner.BlockKind
 import com.example.nag.planner.LockState
 import com.example.nag.planner.ScheduledBlock
 import java.time.Duration
+import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
 private val BLOCK_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -36,8 +40,10 @@ fun ScheduledBlockDialog(
     onDelete: (() -> Unit)? = null,
     onSetLockState: ((LockState?) -> Unit)? = null,
     isDone: Boolean = false,
-    onToggleDone: (() -> Unit)? = null
+    onToggleDone: (() -> Unit)? = null,
+    onMove: ((LocalDateTime) -> Unit)? = null
 ) {
+    val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(block.title) },
@@ -68,6 +74,19 @@ fun ScheduledBlockDialog(
                     Spacer(Modifier.height(8.dp))
                     TextButton(onClick = onToggleDone) {
                         Text(if (isDone) "Mark not done" else "Mark done")
+                    }
+                }
+
+                if (onMove != null) {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = {
+                        TimePickerDialog(
+                            context,
+                            { _, h, m -> onMove(LocalDateTime.of(block.start.toLocalDate(), LocalTime.of(h, m))) },
+                            block.start.hour, block.start.minute, true
+                        ).show()
+                    }) {
+                        Text("Move to a specific time")
                     }
                 }
 

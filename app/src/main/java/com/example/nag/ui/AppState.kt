@@ -13,8 +13,8 @@ import com.example.nag.notify.Scheduler
 import com.example.nag.planner.DayShape
 import com.example.nag.planner.LockState
 import com.example.nag.planner.OccurrenceKey
-import com.example.nag.planner.Placer
 import com.example.nag.planner.PlannerOverrides
+import com.example.nag.planner.PlannerScheduler
 import com.example.nag.planner.PlannerStore
 import com.example.nag.planner.PlannerSync
 import com.example.nag.planner.PlannerTask
@@ -22,6 +22,7 @@ import com.example.nag.planner.ScheduledBlock
 import com.example.nag.widget.NagWidget
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.temporal.TemporalAdjusters
 
 /**
@@ -57,14 +58,17 @@ class AppState(private val context: Context) {
     var plannerCompletions by mutableStateOf(PlannerStore.loadCompletions(context))
         private set
 
+    var plannerTaskAssignments by mutableStateOf(PlannerStore.loadTaskAssignments(context))
+        private set
+
     var plannerSyncing by mutableStateOf(false)
         private set
 
     var plannerSyncError by mutableStateOf<String?>(null)
         private set
 
-    /** Not user-editable yet (see docs/FEATURES.md), but exposed so the UI can show the same values it plans around. */
-    val dayShape = DayShape()
+    var dayShape by mutableStateOf(PlannerStore.loadDayShape(context))
+        private set
 
     fun reload() {
         habits = Store.loadHabits(context)
@@ -76,6 +80,8 @@ class AppState(private val context: Context) {
         plannerTasks = PlannerStore.loadTasks(context)
         plannerOverrides = PlannerStore.loadOverrides(context)
         plannerCompletions = PlannerStore.loadCompletions(context)
+        plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
+        dayShape = PlannerStore.loadDayShape(context)
     }
 
     private fun afterChange() {
@@ -161,17 +167,25 @@ class AppState(private val context: Context) {
     }
 
     fun upsertTask(task: PlannerTask) {
-        val updated = if (plannerTasks.any { it.id == task.id })
-            plannerTasks.map { if (it.id == task.id) task else it }
+        val isEdit = plannerTasks.any { it.id == task.id }
+        val updated = if (isEdit) plannerTasks.map { if (it.id == task.id) task else it }
         else plannerTasks + task
         PlannerStore.saveTasks(context, updated)
         plannerTasks = updated
+        // The old placement may no longer fit (duration/deadline changed), so let it be
+        // decided again — respecting the same "never before today" rule as a new task.
+        if (isEdit) {
+            PlannerStore.clearTaskAssignment(context, task.id)
+            plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
+        }
     }
 
     fun deleteTask(id: String) {
         val updated = plannerTasks.filterNot { it.id == id }
         PlannerStore.saveTasks(context, updated)
         plannerTasks = updated
+        PlannerStore.clearTaskAssignment(context, id)
+        plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
     }
 
     /** Skip this occurrence, or make it flexible so the placer can move it — events only for now. */
@@ -195,13 +209,43 @@ class AppState(private val context: Context) {
         plannerCompletions = updated
     }
 
-    /** Locked events plus whatever the placer fits the flexible tasks around them. */
-    fun plannerSchedule(weekStart: LocalDate): List<ScheduledBlock> =
-        Placer.place(weekStart, plannerEvents, plannerTasks, PlannerOverrides(plannerOverrides), dayShape)
+    /**
+     * Locked events plus whatever the placer fits the flexible tasks around them. Goes
+     * through [PlannerScheduler] rather than calling [Placer] directly so a one-off
+     * task, once placed, stays on the day it was placed rather than being re-decided
+     * every time a different week is viewed.
+     */
+    fun plannerSchedule(weekStart: LocalDate, today: LocalDate): List<ScheduledBlock> {
+        val result = PlannerScheduler.schedule(
+            context, weekStart, today, plannerEvents, plannerTasks, PlannerOverrides(plannerOverrides), dayShape
+        )
+        plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
+        return result
+    }
 
-    /** Just [date]'s slice of its week's schedule — what the Today screen shows. */
+    /** Just [date]'s slice of its week's schedule — what the Today screen shows. [date] is today. */
     fun plannerScheduleForDay(date: LocalDate): List<ScheduledBlock> {
         val weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-        return plannerSchedule(weekStart).filter { it.start.toLocalDate() == date }
+        return plannerSchedule(weekStart, today = date).filter { it.start.toLocalDate() == date }
+    }
+
+    /** Forgets every not-yet-past one-off placement so the next view re-decides them from scratch. */
+    fun recalculatePlanner(today: LocalDate) {
+        PlannerScheduler.recalculate(context, today)
+        plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
+    }
+
+    /** The dialog validates the shape before calling this, so it's just persist-and-apply here. */
+    fun setDayShape(newShape: DayShape) {
+        PlannerStore.saveDayShape(context, newShape)
+        dayShape = newShape
+        NagWidget.refresh(context)
+    }
+
+    /** Pins an already-placed one-off task to a new time the user chose, without re-running the placer. */
+    fun moveTaskAssignment(taskId: String, newStart: LocalDateTime) {
+        val duration = plannerTasks.firstOrNull { it.id == taskId }?.durationMinutes ?: return
+        PlannerScheduler.moveTaskAssignment(context, taskId, newStart, duration)
+        plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
     }
 }
