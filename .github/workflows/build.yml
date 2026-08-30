@@ -11,7 +11,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # A fresh repo restarts run numbers at 1, which would put versionCode below the
       # build already on the phone, and Android refuses to install a downgrade. The
@@ -20,8 +20,23 @@ jobs:
       - name: Work out the version number
         run: echo "BUILD_NUMBER=$((${{ github.run_number }} + 100))" >> "$GITHUB_ENV"
 
+      # Takes whatever zip is sitting in the repo root, so the exact filename doesn't
+      # matter. GitHub's uploader likes to append things like "(1)" to names.
       - name: Unpack the project
-        run: unzip -qo nag-android.zip
+        run: |
+          echo "Files in the repo root:"
+          ls -la
+          ZIP=$(find . -maxdepth 1 -name '*.zip' | head -n 1)
+          if [ -z "$ZIP" ]; then
+            echo "::error::No .zip file in the repo root. Upload nag-android.zip there."
+            exit 1
+          fi
+          echo "Unpacking $ZIP"
+          unzip -qo "$ZIP"
+          if [ ! -f nag/settings.gradle.kts ]; then
+            echo "::error::$ZIP did not contain the nag/ project folder. Wrong zip?"
+            exit 1
+          fi
 
       # The signing key is not in the repo. Without it the APK builds unsigned and
       # won't install over your existing one, so fail loudly rather than quietly.
@@ -51,7 +66,7 @@ jobs:
         working-directory: nag
         run: gradle assembleRelease --no-daemon
 
-      - name: Check the APK came out signed
+      - name: Check the APK exists
         run: |
           APK=nag/app/build/outputs/apk/release/app-release.apk
           test -f "$APK" || { echo "::error::No APK produced"; exit 1; }
