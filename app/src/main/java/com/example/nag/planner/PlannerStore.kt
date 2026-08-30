@@ -8,6 +8,7 @@ object PlannerStore {
     private const val PREFS = "nag_planner_prefs"
     private const val KEY_FEED_URL = "feed_url"
     private const val KEY_EVENTS = "events"
+    private const val KEY_TASKS = "tasks"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -26,5 +27,14 @@ object PlannerStore {
 
     fun saveEvents(context: Context, events: List<PlannerEvent>) {
         prefs(context).edit().putString(KEY_EVENTS, PlannerJson.eventsToString(events)).apply()
+    }
+
+    fun loadTasks(context: Context): List<PlannerTask> {
+        val raw = prefs(context).getString(KEY_TASKS, null) ?: return emptyList()
+        return PlannerJson.tasksFromString(raw)
+    }
+
+    fun saveTasks(context: Context, tasks: List<PlannerTask>) {
+        prefs(context).edit().putString(KEY_TASKS, PlannerJson.tasksToString(tasks)).apply()
     }
 }

@@ -114,5 +114,6 @@ data class ScheduledBlock(
     val title: String,
     val start: LocalDateTime,
     val end: LocalDateTime,
-    val lockState: LockState
+    val lockState: LockState,
+    val location: String? = null
 )

@@ -56,6 +56,7 @@ import com.example.nag.ui.DetailScreen
 import com.example.nag.ui.HabitDialog
 import com.example.nag.ui.PlannerLinkDialog
 import com.example.nag.ui.PromptDialog
+import com.example.nag.ui.TaskDialog
 import com.example.nag.ui.TodayScreen
 import java.time.LocalDate
 
@@ -111,6 +112,7 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
     var amountFor by remember { mutableStateOf<Habit?>(null) }
     var detailId by remember { mutableStateOf<String?>(null) }
     var plannerLinkOpen by remember { mutableStateOf(false) }
+    var taskCreating by remember { mutableStateOf(false) }
 
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -268,9 +270,12 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
             }
         },
         floatingActionButton = {
-            if (tab == Tab.TODAY) {
-                FloatingActionButton(onClick = { creating = true }) {
+            when (tab) {
+                Tab.TODAY -> FloatingActionButton(onClick = { creating = true }) {
                     Icon(Icons.Default.Add, contentDescription = "Add a check-in")
+                }
+                Tab.CALENDAR -> FloatingActionButton(onClick = { taskCreating = true }) {
+                    Icon(Icons.Default.Add, contentDescription = "Add a task")
                 }
             }
         }
@@ -313,6 +318,16 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
     }
 
     EditingDialogs(state, today, editing, { editing = it }, amountFor, { amountFor = it })
+
+    if (taskCreating) {
+        TaskDialog(
+            onDismiss = { taskCreating = false },
+            onSave = {
+                taskCreating = false
+                state.upsertTask(it)
+            }
+        )
+    }
 
     if (plannerLinkOpen) {
         PlannerLinkDialog(

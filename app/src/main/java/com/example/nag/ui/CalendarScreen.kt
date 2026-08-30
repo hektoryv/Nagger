@@ -50,11 +50,13 @@ import com.example.nag.data.DayStatus
 import com.example.nag.data.Habit
 import com.example.nag.data.habitColorArgb
 import com.example.nag.logic.Schedule
+import com.example.nag.planner.BlockKind
 import com.example.nag.planner.LockState
 import com.example.nag.planner.ScheduledBlock
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
@@ -72,6 +74,7 @@ fun CalendarScreen(
         mutableStateOf(today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)))
     }
     var selected by remember { mutableStateOf<LocalDate?>(null) }
+    var selectedBlock by remember { mutableStateOf<ScheduledBlock?>(null) }
 
     Column(
         Modifier
@@ -100,13 +103,27 @@ fun CalendarScreen(
             }
         }
 
-        WeekGrid(state, weekStart, today) { selected = it }
+        WeekGrid(state, weekStart, today, onDayClick = { selected = it }, onBlockClick = { selectedBlock = it })
         Legend()
     }
 
     val day = selected
     if (day != null) {
         DayDetailDialog(state, day, today, { selected = null }, onSetDone, onClearDone)
+    }
+
+    val block = selectedBlock
+    if (block != null) {
+        ScheduledBlockDialog(
+            block = block,
+            onDismiss = { selectedBlock = null },
+            onDelete = if (block.kind == BlockKind.TASK) {
+                {
+                    state.deleteTask(block.occurrenceKey.sourceId)
+                    selectedBlock = null
+                }
+            } else null
+        )
     }
 }
 
@@ -195,9 +212,10 @@ private fun WeekGrid(
     state: AppState,
     weekStart: LocalDate,
     today: LocalDate,
-    onDayClick: (LocalDate) -> Unit
+    onDayClick: (LocalDate) -> Unit,
+    onBlockClick: (ScheduledBlock) -> Unit
 ) {
-    val schedule = remember(state.plannerEvents, weekStart) { state.plannerSchedule(weekStart) }
+    val schedule = remember(state.plannerEvents, state.plannerTasks, weekStart) { state.plannerSchedule(weekStart) }
 
     Column(Modifier.padding(horizontal = 6.dp)) {
         Row(Modifier.fillMaxWidth()) {
@@ -226,6 +244,7 @@ private fun WeekGrid(
                 val date = weekStart.plusDays(offset.toLong())
                 DayTimelineColumn(
                     blocks = schedule.filter { it.start.toLocalDate() == date },
+                    onBlockClick = onBlockClick,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -250,7 +269,11 @@ private fun HourGutter() {
 }
 
 @Composable
-private fun DayTimelineColumn(blocks: List<ScheduledBlock>, modifier: Modifier) {
+private fun DayTimelineColumn(
+    blocks: List<ScheduledBlock>,
+    onBlockClick: (ScheduledBlock) -> Unit,
+    modifier: Modifier
+) {
     val totalHours = TIMELINE_END_HOUR - TIMELINE_START_HOUR
     val lineColor = MaterialTheme.colorScheme.outlineVariant
 
@@ -266,12 +289,12 @@ private fun DayTimelineColumn(blocks: List<ScheduledBlock>, modifier: Modifier) 
                 }
             }
     ) {
-        blocks.forEach { block -> ScheduledBlockView(block) }
+        blocks.forEach { block -> ScheduledBlockView(block, onClick = { onBlockClick(block) }) }
     }
 }
 
 @Composable
-private fun ScheduledBlockView(block: ScheduledBlock) {
+private fun ScheduledBlockView(block: ScheduledBlock, onClick: () -> Unit) {
     val startMinutes = ((block.start.hour - TIMELINE_START_HOUR) * 60 + block.start.minute)
         .coerceIn(0, (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * 60)
     val top = HOUR_HEIGHT * (startMinutes / 60f)
@@ -289,6 +312,7 @@ private fun ScheduledBlockView(block: ScheduledBlock) {
             .clip(RoundedCornerShape(3.dp))
             .background(MaterialTheme.colorScheme.secondaryContainer)
             .border(1.dp, borderColor, RoundedCornerShape(3.dp))
+            .clickable(onClick = onClick)
             .padding(horizontal = 2.dp, vertical = 1.dp)
     ) {
         Text(
@@ -458,4 +482,68 @@ private fun DayDetailDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
+}
+
+private val BLOCK_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+private val BLOCK_DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE, MMM d")
+
+/** Everything known about one class or task, shown in full on tap rather than picked over. */
+@Composable
+private fun ScheduledBlockDialog(
+    block: ScheduledBlock,
+    onDismiss: () -> Unit,
+    onDelete: (() -> Unit)?
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(block.title) },
+        text = {
+            Column {
+                BlockInfoRow("Type", if (block.kind == BlockKind.EVENT) "Class" else "Task")
+                BlockInfoRow("Day", block.start.toLocalDate().format(BLOCK_DAY_FORMAT))
+                BlockInfoRow(
+                    "Time",
+                    "${block.start.format(BLOCK_TIME_FORMAT)} – ${block.end.format(BLOCK_TIME_FORMAT)}"
+                )
+                BlockInfoRow("Duration", formatBlockDuration(Duration.between(block.start, block.end)))
+                block.location?.let { BlockInfoRow("Location", it) }
+                BlockInfoRow(
+                    "Status",
+                    when (block.lockState) {
+                        LockState.LOCKED -> "Locked — won't move on replan"
+                        LockState.FLEXIBLE -> "Flexible — the planner can move this"
+                        LockState.SKIPPED -> "Skipped"
+                    }
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        dismissButton = onDelete?.let { delete ->
+            { TextButton(onClick = delete) { Text("Delete task") } }
+        }
+    )
+}
+
+@Composable
+private fun BlockInfoRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(80.dp)
+        )
+        Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+private fun formatBlockDuration(duration: Duration): String {
+    val totalMinutes = duration.toMinutes()
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return when {
+        hours == 0L -> "${minutes}m"
+        minutes == 0L -> "${hours}h"
+        else -> "${hours}h ${minutes}m"
+    }
 }

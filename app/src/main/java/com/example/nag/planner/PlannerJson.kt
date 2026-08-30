@@ -2,10 +2,12 @@ package com.example.nag.planner
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
 import java.time.LocalDateTime
 
 /**
- * Turning [PlannerEvent]s into JSON and back, the same shape as [com.example.nag.data.Json].
+ * Turning [PlannerEvent]s and [PlannerTask]s into JSON and back, the same shape as
+ * [com.example.nag.data.Json].
  *
  * No unit tests here, matching that file: this project's unit test setup has no
  * testOptions/org.json override, and Android's android.jar stubs org.json's real
@@ -40,4 +42,50 @@ object PlannerJson {
         val array = JSONArray(raw)
         (0 until array.length()).mapNotNull { eventFromJson(array.getJSONObject(it)) }
     }.getOrDefault(emptyList())
+
+    fun taskToJson(task: PlannerTask): JSONObject = JSONObject().apply {
+        put("id", task.id)
+        put("title", task.title)
+        put("durationMinutes", task.durationMinutes)
+        put("deadline", task.deadline?.toString() ?: JSONObject.NULL)
+        put("recurrence", recurrenceToJson(task.recurrence))
+    }
+
+    fun taskFromJson(o: JSONObject): PlannerTask? = runCatching {
+        PlannerTask(
+            id = o.getString("id"),
+            title = o.getString("title"),
+            durationMinutes = o.getInt("durationMinutes"),
+            deadline = if (o.isNull("deadline")) null else o.optString("deadline").ifBlank { null }?.let(LocalDate::parse),
+            recurrence = recurrenceFromJson(o.optJSONObject("recurrence"))
+        )
+    }.getOrNull()
+
+    fun tasksToString(tasks: List<PlannerTask>): String =
+        JSONArray().apply { tasks.forEach { put(taskToJson(it)) } }.toString()
+
+    fun tasksFromString(raw: String): List<PlannerTask> = runCatching {
+        val array = JSONArray(raw)
+        (0 until array.length()).mapNotNull { taskFromJson(array.getJSONObject(it)) }
+    }.getOrDefault(emptyList())
+
+    private fun recurrenceToJson(recurrence: TaskRecurrence): JSONObject = JSONObject().apply {
+        when (recurrence) {
+            TaskRecurrence.None -> put("kind", "NONE")
+            TaskRecurrence.Daily -> put("kind", "DAILY")
+            is TaskRecurrence.TimesPerWeek -> {
+                put("kind", "TIMES_PER_WEEK")
+                put("count", recurrence.count)
+            }
+        }
+    }
+
+    private fun recurrenceFromJson(o: JSONObject?): TaskRecurrence {
+        if (o == null) return TaskRecurrence.None
+        return when (o.optString("kind")) {
+            "DAILY" -> TaskRecurrence.Daily
+            "TIMES_PER_WEEK" -> TaskRecurrence.TimesPerWeek(o.optInt("count", 1).coerceIn(1, 7))
+            else -> TaskRecurrence.None
+        }
+    }
 }

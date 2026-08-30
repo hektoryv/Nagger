@@ -36,7 +36,7 @@ object Placer {
             val key = OccurrenceKey(event.id, date)
             val lockState = overrides.lockStateFor(key, BlockKind.EVENT)
             if (lockState == LockState.SKIPPED) return@mapNotNull null
-            ScheduledBlock(key, BlockKind.EVENT, event.title, event.start, event.end, lockState)
+            ScheduledBlock(key, BlockKind.EVENT, event.title, event.start, event.end, lockState, event.location)
         }
 
         val busyByDay: Map<LocalDate, MutableList<ScheduledBlock>> = weekDays.associateWith { date ->

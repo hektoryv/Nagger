@@ -15,6 +15,7 @@ import com.example.nag.planner.Placer
 import com.example.nag.planner.PlannerOverrides
 import com.example.nag.planner.PlannerStore
 import com.example.nag.planner.PlannerSync
+import com.example.nag.planner.PlannerTask
 import com.example.nag.planner.ScheduledBlock
 import com.example.nag.widget.NagWidget
 import java.time.LocalDate
@@ -43,6 +44,9 @@ class AppState(private val context: Context) {
     var plannerEvents by mutableStateOf(PlannerStore.loadEvents(context))
         private set
 
+    var plannerTasks by mutableStateOf(PlannerStore.loadTasks(context))
+        private set
+
     var plannerSyncing by mutableStateOf(false)
         private set
 
@@ -56,6 +60,7 @@ class AppState(private val context: Context) {
         backupFolder = Backup.folderLabel(context)
         plannerFeedUrl = PlannerStore.loadFeedUrl(context)
         plannerEvents = PlannerStore.loadEvents(context)
+        plannerTasks = PlannerStore.loadTasks(context)
     }
 
     private fun afterChange() {
@@ -135,7 +140,21 @@ class AppState(private val context: Context) {
         plannerSyncing = false
     }
 
-    /** Locked events plus, once there's a way to enter tasks, whatever the placer fits around them. */
+    fun upsertTask(task: PlannerTask) {
+        val updated = if (plannerTasks.any { it.id == task.id })
+            plannerTasks.map { if (it.id == task.id) task else it }
+        else plannerTasks + task
+        PlannerStore.saveTasks(context, updated)
+        plannerTasks = updated
+    }
+
+    fun deleteTask(id: String) {
+        val updated = plannerTasks.filterNot { it.id == id }
+        PlannerStore.saveTasks(context, updated)
+        plannerTasks = updated
+    }
+
+    /** Locked events plus whatever the placer fits the flexible tasks around them. */
     fun plannerSchedule(weekStart: LocalDate): List<ScheduledBlock> =
-        Placer.place(weekStart, plannerEvents, emptyList(), PlannerOverrides(), DayShape())
+        Placer.place(weekStart, plannerEvents, plannerTasks, PlannerOverrides(), DayShape())
 }
