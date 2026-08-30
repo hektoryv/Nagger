@@ -99,7 +99,14 @@ fun TodayScreen(
         if (schedule.isNotEmpty()) {
             SectionLabel("Today's schedule")
             schedule.forEach { block ->
-                ScheduledBlockRow(block, onClick = { selectedBlock = block })
+                ScheduledBlockRow(
+                    block = block,
+                    isDone = block.occurrenceKey in state.plannerCompletions,
+                    onToggleDone = if (block.kind == BlockKind.TASK) {
+                        { done -> state.setTaskOccurrenceDone(block.occurrenceKey, done) }
+                    } else null,
+                    onClick = { selectedBlock = block }
+                )
                 HorizontalDivider()
             }
         }
@@ -165,6 +172,13 @@ fun TodayScreen(
                 { lockState ->
                     if (lockState == null) state.clearOverride(block.occurrenceKey)
                     else state.setOverride(block.occurrenceKey, lockState)
+                    selectedBlock = null
+                }
+            } else null,
+            isDone = block.occurrenceKey in state.plannerCompletions,
+            onToggleDone = if (block.kind == BlockKind.TASK) {
+                {
+                    state.setTaskOccurrenceDone(block.occurrenceKey, block.occurrenceKey !in state.plannerCompletions)
                     selectedBlock = null
                 }
             } else null
@@ -235,11 +249,21 @@ private fun PlainRow(
 private val ROW_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 @Composable
-private fun ScheduledBlockRow(block: ScheduledBlock, onClick: () -> Unit) {
+private fun ScheduledBlockRow(
+    block: ScheduledBlock,
+    isDone: Boolean,
+    onToggleDone: ((Boolean) -> Unit)?,
+    onClick: () -> Unit
+) {
     ListItem(
         modifier = Modifier.clickable { onClick() },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        headlineContent = { Text(block.title) },
+        leadingContent = if (onToggleDone != null) {
+            { Checkbox(checked = isDone, onCheckedChange = onToggleDone) }
+        } else null,
+        headlineContent = {
+            Text(block.title, textDecoration = if (isDone) TextDecoration.LineThrough else null)
+        },
         supportingContent = {
             val kind = if (block.kind == BlockKind.EVENT) "Class" else "Task"
             val bits = buildList {

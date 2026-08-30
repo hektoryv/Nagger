@@ -35,6 +35,7 @@ class ReminderReceiver : BroadcastReceiver() {
 
         NagWidget.refresh(context)
         Scheduler.scheduleNightly(context)
+        PlannerSyncWork.syncIfLinked(context, goAsync())
     }
 }
 

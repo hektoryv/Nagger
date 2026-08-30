@@ -10,6 +10,7 @@ object PlannerStore {
     private const val KEY_EVENTS = "events"
     private const val KEY_TASKS = "tasks"
     private const val KEY_OVERRIDES = "overrides"
+    private const val KEY_COMPLETIONS = "completions"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -46,5 +47,14 @@ object PlannerStore {
 
     fun saveOverrides(context: Context, overrides: Map<OccurrenceKey, LockState>) {
         prefs(context).edit().putString(KEY_OVERRIDES, PlannerJson.overridesToString(overrides)).apply()
+    }
+
+    fun loadCompletions(context: Context): Set<OccurrenceKey> {
+        val raw = prefs(context).getString(KEY_COMPLETIONS, null) ?: return emptySet()
+        return PlannerJson.completionsFromString(raw)
+    }
+
+    fun saveCompletions(context: Context, completions: Set<OccurrenceKey>) {
+        prefs(context).edit().putString(KEY_COMPLETIONS, PlannerJson.completionsToString(completions)).apply()
     }
 }

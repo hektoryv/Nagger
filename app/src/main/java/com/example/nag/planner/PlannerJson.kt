@@ -111,4 +111,25 @@ object PlannerJson {
         val key = OccurrenceKey(o.getString("sourceId"), LocalDate.parse(o.getString("date")))
         key to LockState.valueOf(o.getString("state"))
     }.getOrNull()
+
+    fun completionsToString(completions: Set<OccurrenceKey>): String =
+        JSONArray().apply {
+            completions.forEach { key ->
+                put(
+                    JSONObject().apply {
+                        put("sourceId", key.sourceId)
+                        put("date", key.date.toString())
+                    }
+                )
+            }
+        }.toString()
+
+    fun completionsFromString(raw: String): Set<OccurrenceKey> = runCatching {
+        val array = JSONArray(raw)
+        (0 until array.length()).mapNotNull { i -> occurrenceKeyFromJson(array.getJSONObject(i)) }.toSet()
+    }.getOrDefault(emptySet())
+
+    private fun occurrenceKeyFromJson(o: JSONObject): OccurrenceKey? = runCatching {
+        OccurrenceKey(o.getString("sourceId"), LocalDate.parse(o.getString("date")))
+    }.getOrNull()
 }

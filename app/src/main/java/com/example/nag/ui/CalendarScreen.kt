@@ -44,6 +44,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,6 +55,7 @@ import com.example.nag.logic.Schedule
 import com.example.nag.planner.BlockKind
 import com.example.nag.planner.DayShape
 import com.example.nag.planner.LockState
+import com.example.nag.planner.OccurrenceKey
 import com.example.nag.planner.ScheduledBlock
 import java.time.DayOfWeek
 import java.time.Duration
@@ -129,6 +131,13 @@ fun CalendarScreen(
                 { lockState ->
                     if (lockState == null) state.clearOverride(block.occurrenceKey)
                     else state.setOverride(block.occurrenceKey, lockState)
+                    selectedBlock = null
+                }
+            } else null,
+            isDone = block.occurrenceKey in state.plannerCompletions,
+            onToggleDone = if (block.kind == BlockKind.TASK) {
+                {
+                    state.setTaskOccurrenceDone(block.occurrenceKey, block.occurrenceKey !in state.plannerCompletions)
                     selectedBlock = null
                 }
             } else null
@@ -255,6 +264,7 @@ private fun WeekGrid(
                 val date = weekStart.plusDays(offset.toLong())
                 DayTimelineColumn(
                     blocks = schedule.filter { it.start.toLocalDate() == date },
+                    completions = state.plannerCompletions,
                     dayShape = state.dayShape,
                     onBlockClick = onBlockClick,
                     modifier = Modifier.weight(1f)
@@ -283,6 +293,7 @@ private fun HourGutter() {
 @Composable
 private fun DayTimelineColumn(
     blocks: List<ScheduledBlock>,
+    completions: Set<OccurrenceKey>,
     dayShape: DayShape,
     onBlockClick: (ScheduledBlock) -> Unit,
     modifier: Modifier
@@ -318,12 +329,14 @@ private fun DayTimelineColumn(
                 }
             }
     ) {
-        blocks.forEach { block -> ScheduledBlockView(block, onClick = { onBlockClick(block) }) }
+        blocks.forEach { block ->
+            ScheduledBlockView(block, isDone = block.occurrenceKey in completions, onClick = { onBlockClick(block) })
+        }
     }
 }
 
 @Composable
-private fun ScheduledBlockView(block: ScheduledBlock, onClick: () -> Unit) {
+private fun ScheduledBlockView(block: ScheduledBlock, isDone: Boolean, onClick: () -> Unit) {
     val startMinutes = ((block.start.hour - TIMELINE_START_HOUR) * 60 + block.start.minute)
         .coerceIn(0, (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * 60)
     val top = HOUR_HEIGHT * (startMinutes / 60f)
@@ -350,6 +363,7 @@ private fun ScheduledBlockView(block: ScheduledBlock, onClick: () -> Unit) {
             lineHeight = 9.sp,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
+            textDecoration = if (isDone) TextDecoration.LineThrough else null,
             color = MaterialTheme.colorScheme.onSecondaryContainer
         )
     }

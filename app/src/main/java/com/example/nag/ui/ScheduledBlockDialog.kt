@@ -34,7 +34,9 @@ fun ScheduledBlockDialog(
     block: ScheduledBlock,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)? = null,
-    onSetLockState: ((LockState?) -> Unit)? = null
+    onSetLockState: ((LockState?) -> Unit)? = null,
+    isDone: Boolean = false,
+    onToggleDone: (() -> Unit)? = null
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -58,6 +60,16 @@ fun ScheduledBlockDialog(
                         LockState.SKIPPED -> "Skipped"
                     }
                 )
+                if (onToggleDone != null) {
+                    BlockInfoRow("Done", if (isDone) "Yes" else "Not yet")
+                }
+
+                if (onToggleDone != null) {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onToggleDone) {
+                        Text(if (isDone) "Mark not done" else "Mark done")
+                    }
+                }
 
                 if (onSetLockState != null) {
                     Spacer(Modifier.height(8.dp))

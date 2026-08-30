@@ -54,6 +54,9 @@ class AppState(private val context: Context) {
     var plannerOverrides by mutableStateOf(PlannerStore.loadOverrides(context))
         private set
 
+    var plannerCompletions by mutableStateOf(PlannerStore.loadCompletions(context))
+        private set
+
     var plannerSyncing by mutableStateOf(false)
         private set
 
@@ -72,6 +75,7 @@ class AppState(private val context: Context) {
         plannerEvents = PlannerStore.loadEvents(context)
         plannerTasks = PlannerStore.loadTasks(context)
         plannerOverrides = PlannerStore.loadOverrides(context)
+        plannerCompletions = PlannerStore.loadCompletions(context)
     }
 
     private fun afterChange() {
@@ -182,6 +186,13 @@ class AppState(private val context: Context) {
         val updated = plannerOverrides - key
         PlannerStore.saveOverrides(context, updated)
         plannerOverrides = updated
+    }
+
+    /** Marks one task occurrence done or not. Doesn't affect future placement (see docs/FEATURES.md). */
+    fun setTaskOccurrenceDone(key: OccurrenceKey, done: Boolean) {
+        val updated = if (done) plannerCompletions + key else plannerCompletions - key
+        PlannerStore.saveCompletions(context, updated)
+        plannerCompletions = updated
     }
 
     /** Locked events plus whatever the placer fits the flexible tasks around them. */
