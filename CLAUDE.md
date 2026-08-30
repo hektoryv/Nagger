@@ -22,6 +22,12 @@ installs updates through Obtainium, which watches this repo's GitHub Releases.
 - When something breaks, diagnose the actual cause rather than guessing. Past bugs had
   precise causes worth finding: an `unzip` exit code 9 meant a missing file, not a
   corrupt zip.
+- Before touching any screen, dialog, or menu, read `docs/FEATURES.md` — the running
+  inventory of every user-facing control that currently exists. Update it in the same
+  commit as any change that adds, renames, or removes one. This exists because a
+  feature can go missing without a single line being deleted: data gets saved
+  correctly but nothing in the UI ever shows it again. Check `docs/FEATURES.md`'s
+  "Known gaps" section before reporting a task done.
 
 ## Build and release pipeline
 
