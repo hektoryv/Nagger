@@ -236,7 +236,7 @@ class AppState(private val context: Context) {
     }
 
     /** The dialog validates the shape before calling this, so it's just persist-and-apply here. */
-    fun setDayShape(newShape: DayShape) {
+    fun applyDayShape(newShape: DayShape) {
         PlannerStore.saveDayShape(context, newShape)
         dayShape = newShape
         NagWidget.refresh(context)

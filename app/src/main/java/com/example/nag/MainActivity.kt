@@ -398,7 +398,7 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
             onDismiss = { dayShapeOpen = false },
             onSave = {
                 dayShapeOpen = false
-                state.setDayShape(it)
+                state.applyDayShape(it)
             }
         )
     }
