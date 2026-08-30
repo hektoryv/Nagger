@@ -47,12 +47,15 @@ fun TaskDialog(
     var hours by remember { mutableStateOf("1") }
     var minutes by remember { mutableStateOf("0") }
     var repeatKind by remember { mutableStateOf(RepeatChoice.ONCE) }
-    var timesPerWeek by remember { mutableStateOf(2) }
+    var timesPerWeek by remember { mutableStateOf("2") }
     var hasDeadline by remember { mutableStateOf(false) }
     var deadline by remember { mutableStateOf<LocalDate?>(null) }
 
     val durationMinutes = (hours.toIntOrNull() ?: 0) * 60 + (minutes.toIntOrNull() ?: 0)
-    val canSave = title.isNotBlank() && durationMinutes > 0
+    val timesPerWeekCount = (timesPerWeek.toIntOrNull() ?: 0).coerceIn(1, 7)
+    val canSave = title.isNotBlank() &&
+        durationMinutes > 0 &&
+        (repeatKind != RepeatChoice.TIMES_PER_WEEK || timesPerWeek.toIntOrNull() != null)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -111,9 +114,10 @@ fun TaskDialog(
                     if (repeatKind == RepeatChoice.TIMES_PER_WEEK) {
                         Spacer(Modifier.width(8.dp))
                         OutlinedTextField(
-                            value = timesPerWeek.toString(),
-                            onValueChange = {
-                                timesPerWeek = it.toIntOrNull()?.coerceIn(1, 7) ?: timesPerWeek
+                            value = timesPerWeek,
+                            onValueChange = { new ->
+                                val digits = new.filter(Char::isDigit)
+                                timesPerWeek = if (digits.length <= 1) digits else digits.takeLast(1)
                             },
                             label = { Text("Times") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -157,7 +161,7 @@ fun TaskDialog(
                             recurrence = when (repeatKind) {
                                 RepeatChoice.ONCE -> TaskRecurrence.None
                                 RepeatChoice.DAILY -> TaskRecurrence.Daily
-                                RepeatChoice.TIMES_PER_WEEK -> TaskRecurrence.TimesPerWeek(timesPerWeek)
+                                RepeatChoice.TIMES_PER_WEEK -> TaskRecurrence.TimesPerWeek(timesPerWeekCount)
                             }
                         )
                     )

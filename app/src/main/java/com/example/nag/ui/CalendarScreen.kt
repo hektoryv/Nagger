@@ -56,7 +56,6 @@ import com.example.nag.planner.ScheduledBlock
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
@@ -482,68 +481,4 @@ private fun DayDetailDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
-}
-
-private val BLOCK_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-private val BLOCK_DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE, MMM d")
-
-/** Everything known about one class or task, shown in full on tap rather than picked over. */
-@Composable
-private fun ScheduledBlockDialog(
-    block: ScheduledBlock,
-    onDismiss: () -> Unit,
-    onDelete: (() -> Unit)?
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(block.title) },
-        text = {
-            Column {
-                BlockInfoRow("Type", if (block.kind == BlockKind.EVENT) "Class" else "Task")
-                BlockInfoRow("Day", block.start.toLocalDate().format(BLOCK_DAY_FORMAT))
-                BlockInfoRow(
-                    "Time",
-                    "${block.start.format(BLOCK_TIME_FORMAT)} – ${block.end.format(BLOCK_TIME_FORMAT)}"
-                )
-                BlockInfoRow("Duration", formatBlockDuration(Duration.between(block.start, block.end)))
-                block.location?.let { BlockInfoRow("Location", it) }
-                BlockInfoRow(
-                    "Status",
-                    when (block.lockState) {
-                        LockState.LOCKED -> "Locked — won't move on replan"
-                        LockState.FLEXIBLE -> "Flexible — the planner can move this"
-                        LockState.SKIPPED -> "Skipped"
-                    }
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-        dismissButton = onDelete?.let { delete ->
-            { TextButton(onClick = delete) { Text("Delete task") } }
-        }
-    )
-}
-
-@Composable
-private fun BlockInfoRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(80.dp)
-        )
-        Text(value, style = MaterialTheme.typography.bodyMedium)
-    }
-}
-
-private fun formatBlockDuration(duration: Duration): String {
-    val totalMinutes = duration.toMinutes()
-    val hours = totalMinutes / 60
-    val minutes = totalMinutes % 60
-    return when {
-        hours == 0L -> "${minutes}m"
-        minutes == 0L -> "${hours}h"
-        else -> "${hours}h ${minutes}m"
-    }
 }

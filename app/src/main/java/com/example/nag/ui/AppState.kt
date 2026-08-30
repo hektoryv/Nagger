@@ -18,7 +18,9 @@ import com.example.nag.planner.PlannerSync
 import com.example.nag.planner.PlannerTask
 import com.example.nag.planner.ScheduledBlock
 import com.example.nag.widget.NagWidget
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.temporal.TemporalAdjusters
 
 /**
  * Single source of truth for the UI. Every write goes through here, which is also
@@ -157,4 +159,10 @@ class AppState(private val context: Context) {
     /** Locked events plus whatever the placer fits the flexible tasks around them. */
     fun plannerSchedule(weekStart: LocalDate): List<ScheduledBlock> =
         Placer.place(weekStart, plannerEvents, plannerTasks, PlannerOverrides(), DayShape())
+
+    /** Just [date]'s slice of its week's schedule — what the Today screen shows. */
+    fun plannerScheduleForDay(date: LocalDate): List<ScheduledBlock> {
+        val weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        return plannerSchedule(weekStart).filter { it.start.toLocalDate() == date }
+    }
 }

@@ -22,6 +22,10 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,7 +36,10 @@ import androidx.compose.ui.unit.sp
 import com.example.nag.data.Habit
 import com.example.nag.data.habitColorArgb
 import com.example.nag.logic.Schedule
+import com.example.nag.planner.BlockKind
+import com.example.nag.planner.ScheduledBlock
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,6 +60,8 @@ fun TodayScreen(
     }
     val paused = state.habits.filter { it.paused }
     val finished = state.habits.filter { it.finished }
+    val schedule = state.plannerScheduleForDay(today).sortedBy { it.start }
+    var selectedBlock by remember { mutableStateOf<ScheduledBlock?>(null) }
 
     Column(
         Modifier
@@ -68,7 +77,7 @@ fun TodayScreen(
             Column(Modifier.padding(18.dp)) {
                 Text(
                     when {
-                        state.habits.isEmpty() -> "Nothing set up yet"
+                        state.habits.isEmpty() && schedule.isEmpty() -> "Nothing set up yet"
                         due.isEmpty() && doneToday.isEmpty() -> "Nothing due today"
                         due.isEmpty() -> "All clear for today"
                         else -> "${due.size} to do today"
@@ -78,12 +87,20 @@ fun TodayScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    if (state.habits.isEmpty())
+                    if (state.habits.isEmpty() && schedule.isEmpty())
                         "Tap + to add something like \"do pull-ups\"."
                     else
                         "Check-in at %02d:%02d".format(state.reminder.first, state.reminder.second),
                     style = MaterialTheme.typography.bodyMedium
                 )
+            }
+        }
+
+        if (schedule.isNotEmpty()) {
+            SectionLabel("Today's schedule")
+            schedule.forEach { block ->
+                ScheduledBlockRow(block, onClick = { selectedBlock = block })
+                HorizontalDivider()
             }
         }
 
@@ -131,6 +148,20 @@ fun TodayScreen(
                 HorizontalDivider()
             }
         }
+    }
+
+    val block = selectedBlock
+    if (block != null) {
+        ScheduledBlockDialog(
+            block = block,
+            onDismiss = { selectedBlock = null },
+            onDelete = if (block.kind == BlockKind.TASK) {
+                {
+                    state.deleteTask(block.occurrenceKey.sourceId)
+                    selectedBlock = null
+                }
+            } else null
+        )
     }
 }
 
@@ -191,6 +222,21 @@ private fun PlainRow(
             )
         },
         supportingContent = { Text(supporting) }
+    )
+}
+
+private val ROW_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+@Composable
+private fun ScheduledBlockRow(block: ScheduledBlock, onClick: () -> Unit) {
+    ListItem(
+        modifier = Modifier.clickable { onClick() },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        headlineContent = { Text(block.title) },
+        supportingContent = {
+            val kind = if (block.kind == BlockKind.EVENT) "Class" else "Task"
+            Text("$kind · ${block.start.format(ROW_TIME_FORMAT)} – ${block.end.format(ROW_TIME_FORMAT)}")
+        }
     )
 }
 
