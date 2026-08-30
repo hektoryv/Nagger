@@ -1,0 +1,13 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild
+.cxx
+
+# The signing key must never be committed. CI writes it from the KEYSTORE_B64 secret.
+signing/*.jks
+signing/*.keystore

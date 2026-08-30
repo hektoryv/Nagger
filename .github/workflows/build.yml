@@ -13,33 +13,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # A fresh repo restarts run numbers at 1, which would put versionCode below the
-      # build already on the phone, and Android refuses to install a downgrade. The
-      # offset keeps new builds ahead. Arithmetic has to happen in the shell because
-      # GitHub's expression syntax has no + operator.
+      # Run numbers restarted when this repo was created, so an offset keeps versionCode
+      # ahead of the builds already installed on the phone. Android refuses to install a
+      # downgrade. Arithmetic lives in the shell because GitHub expressions have no + operator.
       - name: Work out the version number
         run: echo "BUILD_NUMBER=$((${{ github.run_number }} + 100))" >> "$GITHUB_ENV"
 
-      # Takes whatever zip is sitting in the repo root, so the exact filename doesn't
-      # matter. GitHub's uploader likes to append things like "(1)" to names.
-      - name: Unpack the project
-        run: |
-          echo "Files in the repo root:"
-          ls -la
-          ZIP=$(find . -maxdepth 1 -name '*.zip' | head -n 1)
-          if [ -z "$ZIP" ]; then
-            echo "::error::No .zip file in the repo root. Upload nag-android.zip there."
-            exit 1
-          fi
-          echo "Unpacking $ZIP"
-          unzip -qo "$ZIP"
-          if [ ! -f nag/settings.gradle.kts ]; then
-            echo "::error::$ZIP did not contain the nag/ project folder. Wrong zip?"
-            exit 1
-          fi
-
-      # The signing key is not in the repo. Without it the APK builds unsigned and
-      # won't install over your existing one, so fail loudly rather than quietly.
+      # The signing key is never committed. Without it the APK builds unsigned and can't
+      # install over the existing one, so fail loudly rather than shipping a dud.
       - name: Restore signing key
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
@@ -48,9 +29,9 @@ jobs:
             echo "::error::KEYSTORE_B64 secret is missing. Add it under Settings > Secrets and variables > Actions."
             exit 1
           fi
-          mkdir -p nag/signing
-          echo "$KEYSTORE_B64" | base64 -d > nag/signing/nag.jks
-          keytool -list -keystore nag/signing/nag.jks -storepass nagsigning > /dev/null
+          mkdir -p signing
+          echo "$KEYSTORE_B64" | base64 -d > signing/nag.jks
+          keytool -list -keystore signing/nag.jks -storepass nagsigning > /dev/null
           echo "Signing key restored."
 
       - uses: actions/setup-java@v5
@@ -62,20 +43,22 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Run unit tests
+        run: gradle testReleaseUnitTest --no-daemon
+
       - name: Build signed release APK
-        working-directory: nag
         run: gradle assembleRelease --no-daemon
 
       - name: Check the APK exists
         run: |
-          APK=nag/app/build/outputs/apk/release/app-release.apk
+          APK=app/build/outputs/apk/release/app-release.apk
           test -f "$APK" || { echo "::error::No APK produced"; exit 1; }
           echo "Built version 1.$BUILD_NUMBER"
 
       - uses: actions/upload-artifact@v4
         with:
           name: nag-apk
-          path: nag/app/build/outputs/apk/release/app-release.apk
+          path: app/build/outputs/apk/release/app-release.apk
 
       # Published so Obtainium can watch this repo for updates.
       - name: Publish release
@@ -83,7 +66,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "v1.$BUILD_NUMBER" \
-            nag/app/build/outputs/apk/release/app-release.apk \
+            app/build/outputs/apk/release/app-release.apk \
             --title "Nag 1.$BUILD_NUMBER" \
             --notes "Build $BUILD_NUMBER" \
             --repo "${{ github.repository }}"

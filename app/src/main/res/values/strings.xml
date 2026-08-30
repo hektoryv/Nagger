@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Nag</string>
+    <string name="widget_description">What you still have to do today</string>
+</resources>
