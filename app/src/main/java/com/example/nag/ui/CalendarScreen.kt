@@ -45,9 +45,10 @@ import com.example.nag.data.DayStatus
 import com.example.nag.data.Habit
 import com.example.nag.data.habitColorArgb
 import com.example.nag.logic.Schedule
+import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.YearMonth
 import java.time.format.TextStyle
+import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,7 +60,9 @@ fun CalendarScreen(
     onClearDone: (Habit, LocalDate) -> Unit,
     onOpen: (Habit) -> Unit
 ) {
-    var month by remember { mutableStateOf(YearMonth.from(today)) }
+    var weekStart by remember {
+        mutableStateOf(today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)))
+    }
     var selected by remember { mutableStateOf<LocalDate?>(null) }
 
     Column(
@@ -74,21 +77,22 @@ fun CalendarScreen(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { month = month.minusMonths(1) }) {
-                Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Previous month")
+            IconButton(onClick = { weekStart = weekStart.minusWeeks(1) }) {
+                Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Previous week")
             }
             Text(
-                "${month.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${month.year}",
+                "Week of ${weekStart.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())} " +
+                    "${weekStart.dayOfMonth}, ${weekStart.year}",
                 style = MaterialTheme.typography.titleMedium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.weight(1f)
             )
-            IconButton(onClick = { month = month.plusMonths(1) }) {
-                Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Next month")
+            IconButton(onClick = { weekStart = weekStart.plusWeeks(1) }) {
+                Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Next week")
             }
         }
 
-        MonthGrid(state, month, today) { selected = it }
+        WeekGrid(state, weekStart, today) { selected = it }
         Legend()
     }
 
@@ -172,17 +176,12 @@ private fun StatsStrip(state: AppState, today: LocalDate, onOpen: (Habit) -> Uni
 }
 
 @Composable
-private fun MonthGrid(
+private fun WeekGrid(
     state: AppState,
-    month: YearMonth,
+    weekStart: LocalDate,
     today: LocalDate,
     onDayClick: (LocalDate) -> Unit
 ) {
-    val first = month.atDay(1)
-    val leadingBlanks = (first.dayOfWeek.value + 6) % 7
-    val totalCells = leadingBlanks + month.lengthOfMonth()
-    val rows = (totalCells + 6) / 7
-
     Column(Modifier.padding(horizontal = 6.dp)) {
         Row(Modifier.fillMaxWidth()) {
             listOf("M", "T", "W", "T", "F", "S", "S").forEach {
@@ -196,17 +195,9 @@ private fun MonthGrid(
         }
         Spacer(Modifier.height(4.dp))
 
-        repeat(rows) { row ->
-            Row(Modifier.fillMaxWidth()) {
-                repeat(7) { column ->
-                    val cellIndex = row * 7 + column
-                    val dayOfMonth = cellIndex - leadingBlanks + 1
-                    if (dayOfMonth in 1..month.lengthOfMonth()) {
-                        DayCell(state, month.atDay(dayOfMonth), today, Modifier.weight(1f), onDayClick)
-                    } else {
-                        Spacer(Modifier.weight(1f))
-                    }
-                }
+        Row(Modifier.fillMaxWidth()) {
+            repeat(7) { offset ->
+                DayCell(state, weekStart.plusDays(offset.toLong()), today, Modifier.weight(1f), onDayClick)
             }
         }
     }
