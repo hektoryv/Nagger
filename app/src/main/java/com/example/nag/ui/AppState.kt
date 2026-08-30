@@ -113,7 +113,7 @@ class AppState(private val context: Context) {
 
     // ---------- planner ----------
 
-    fun setPlannerFeedUrl(url: String?) {
+    fun setFeedUrl(url: String?) {
         val cleaned = url?.trim()?.ifBlank { null }
         PlannerStore.saveFeedUrl(context, cleaned)
         plannerFeedUrl = cleaned

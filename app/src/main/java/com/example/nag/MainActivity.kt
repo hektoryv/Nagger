@@ -322,7 +322,7 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
             onDismiss = { plannerLinkOpen = false },
             onSave = { url ->
                 plannerLinkOpen = false
-                state.setPlannerFeedUrl(url)
+                state.setFeedUrl(url)
             }
         )
     }
