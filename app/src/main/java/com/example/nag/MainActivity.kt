@@ -54,6 +54,7 @@ import com.example.nag.ui.AppState
 import com.example.nag.ui.CalendarScreen
 import com.example.nag.ui.DetailScreen
 import com.example.nag.ui.HabitDialog
+import com.example.nag.ui.PlannerLinkDialog
 import com.example.nag.ui.PromptDialog
 import com.example.nag.ui.TodayScreen
 import java.time.LocalDate
@@ -109,6 +110,7 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
     var creating by remember { mutableStateOf(false) }
     var amountFor by remember { mutableStateOf<Habit?>(null) }
     var detailId by remember { mutableStateOf<String?>(null) }
+    var plannerLinkOpen by remember { mutableStateOf(false) }
 
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -118,6 +120,11 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    // Syncs on first open (if a link is already saved) and again whenever it's changed.
+    LaunchedEffect(state.plannerFeedUrl) {
+        if (state.plannerFeedUrl != null) state.syncPlanner()
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -228,6 +235,18 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
                                 importLauncher.launch(arrayOf("*/*"))
                             }
                         )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    state.plannerFeedUrl?.let { "Class schedule link" }
+                                        ?: "Add class schedule link"
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                plannerLinkOpen = true
+                            }
+                        )
                     }
                 }
             )
@@ -294,6 +313,19 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
     }
 
     EditingDialogs(state, today, editing, { editing = it }, amountFor, { amountFor = it })
+
+    if (plannerLinkOpen) {
+        PlannerLinkDialog(
+            existing = state.plannerFeedUrl,
+            syncing = state.plannerSyncing,
+            error = state.plannerSyncError,
+            onDismiss = { plannerLinkOpen = false },
+            onSave = { url ->
+                plannerLinkOpen = false
+                state.setPlannerFeedUrl(url)
+            }
+        )
+    }
 
     // Landed here from a notification or a widget row: ask straight out.
     val prompted = promptHabitId?.let { id -> state.habits.firstOrNull { it.id == id } }

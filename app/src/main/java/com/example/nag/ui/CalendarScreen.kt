@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -36,16 +37,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nag.data.DayStatus
 import com.example.nag.data.Habit
 import com.example.nag.data.habitColorArgb
 import com.example.nag.logic.Schedule
+import com.example.nag.planner.LockState
+import com.example.nag.planner.ScheduledBlock
 import java.time.DayOfWeek
+import java.time.Duration
 import java.time.LocalDate
 import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
@@ -175,6 +183,13 @@ private fun StatsStrip(state: AppState, today: LocalDate, onOpen: (Habit) -> Uni
     }
 }
 
+// Timeline covers 06:00-24:00. Most class/task activity for a student falls in this
+// window; anything before it would be an unusual edge case not worth the extra height.
+private const val TIMELINE_START_HOUR = 6
+private const val TIMELINE_END_HOUR = 24
+private val HOUR_HEIGHT = 26.dp
+private val HOUR_GUTTER_WIDTH = 20.dp
+
 @Composable
 private fun WeekGrid(
     state: AppState,
@@ -182,6 +197,8 @@ private fun WeekGrid(
     today: LocalDate,
     onDayClick: (LocalDate) -> Unit
 ) {
+    val schedule = remember(state.plannerEvents, weekStart) { state.plannerSchedule(weekStart) }
+
     Column(Modifier.padding(horizontal = 6.dp)) {
         Row(Modifier.fillMaxWidth()) {
             listOf("M", "T", "W", "T", "F", "S", "S").forEach {
@@ -200,6 +217,88 @@ private fun WeekGrid(
                 DayCell(state, weekStart.plusDays(offset.toLong()), today, Modifier.weight(1f), onDayClick)
             }
         }
+
+        Spacer(Modifier.height(4.dp))
+
+        Row(Modifier.fillMaxWidth()) {
+            HourGutter()
+            repeat(7) { offset ->
+                val date = weekStart.plusDays(offset.toLong())
+                DayTimelineColumn(
+                    blocks = schedule.filter { it.start.toLocalDate() == date },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HourGutter() {
+    val totalHours = TIMELINE_END_HOUR - TIMELINE_START_HOUR
+    Box(Modifier.width(HOUR_GUTTER_WIDTH).height(HOUR_HEIGHT * totalHours)) {
+        for (hour in TIMELINE_START_HOUR until TIMELINE_END_HOUR step 3) {
+            Text(
+                hour.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 8.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.offset(y = HOUR_HEIGHT * (hour - TIMELINE_START_HOUR) - 5.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun DayTimelineColumn(blocks: List<ScheduledBlock>, modifier: Modifier) {
+    val totalHours = TIMELINE_END_HOUR - TIMELINE_START_HOUR
+    val lineColor = MaterialTheme.colorScheme.outlineVariant
+
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(HOUR_HEIGHT * totalHours)
+            .drawBehind {
+                val hourPx = HOUR_HEIGHT.toPx()
+                for (hour in 0..totalHours) {
+                    val y = hour * hourPx
+                    drawLine(lineColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                }
+            }
+    ) {
+        blocks.forEach { block -> ScheduledBlockView(block) }
+    }
+}
+
+@Composable
+private fun ScheduledBlockView(block: ScheduledBlock) {
+    val startMinutes = ((block.start.hour - TIMELINE_START_HOUR) * 60 + block.start.minute)
+        .coerceIn(0, (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * 60)
+    val top = HOUR_HEIGHT * (startMinutes / 60f)
+    val durationHours = (Duration.between(block.start, block.end).toMinutes() / 60f).coerceAtLeast(0.25f)
+    val blockHeight = HOUR_HEIGHT * durationHours
+    val borderColor = if (block.lockState == LockState.LOCKED)
+        MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(blockHeight)
+            .offset(y = top)
+            .padding(horizontal = 1.dp, vertical = 0.5.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .border(1.dp, borderColor, RoundedCornerShape(3.dp))
+            .padding(horizontal = 2.dp, vertical = 1.dp)
+    ) {
+        Text(
+            block.title,
+            fontSize = 8.sp,
+            lineHeight = 9.sp,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSecondaryContainer
+        )
     }
 }
 
