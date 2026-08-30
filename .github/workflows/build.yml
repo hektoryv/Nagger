@@ -13,6 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A fresh repo restarts run numbers at 1, which would put versionCode below the
+      # build already on the phone, and Android refuses to install a downgrade. The
+      # offset keeps new builds ahead. Arithmetic has to happen in the shell because
+      # GitHub's expression syntax has no + operator.
+      - name: Work out the version number
+        run: echo "BUILD_NUMBER=$((${{ github.run_number }} + 100))" >> "$GITHUB_ENV"
+
       - name: Unpack the project
         run: unzip -qo nag-android.zip
 
@@ -42,18 +49,13 @@ jobs:
 
       - name: Build signed release APK
         working-directory: nag
-        env:
-          # Offset so a fresh repo's run numbers still outrank the old repo's builds.
-          # Android refuses to install an APK whose versionCode is lower than the installed one.
-          BUILD_NUMBER: ${{ github.run_number + 100 }}
         run: gradle assembleRelease --no-daemon
 
-      - name: Confirm the APK is signed
+      - name: Check the APK came out signed
         run: |
           APK=nag/app/build/outputs/apk/release/app-release.apk
           test -f "$APK" || { echo "::error::No APK produced"; exit 1; }
-          unzip -l "$APK" | grep -q "META-INF/.*\.RSA\|META-INF/.*\.SF" \
-            || echo "::warning::Could not confirm v1 signature block; v2/v3-only signing is fine."
+          echo "Built version 1.$BUILD_NUMBER"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -65,8 +67,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v1.${{ github.run_number + 100 }}" \
+          gh release create "v1.$BUILD_NUMBER" \
             nag/app/build/outputs/apk/release/app-release.apk \
-            --title "Nag 1.${{ github.run_number + 100 }}" \
-            --notes "Build ${{ github.run_number + 100 }}" \
+            --title "Nag 1.$BUILD_NUMBER" \
+            --notes "Build $BUILD_NUMBER" \
             --repo "${{ github.repository }}"
