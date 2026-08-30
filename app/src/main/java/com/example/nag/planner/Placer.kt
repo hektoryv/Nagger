@@ -57,7 +57,8 @@ object Placer {
 
                 val slot = findSlot(day, task.durationMinutes, dayShape, busy) ?: continue
                 val block = ScheduledBlock(
-                    OccurrenceKey(task.id, day), BlockKind.TASK, task.title, slot.first, slot.second, LockState.FLEXIBLE
+                    OccurrenceKey(task.id, day), BlockKind.TASK, task.title, slot.first, slot.second,
+                    LockState.FLEXIBLE, deadline = task.deadline
                 )
                 placedTasks.add(block)
                 busy.add(block)

@@ -160,6 +160,13 @@ fun TodayScreen(
                     state.deleteTask(block.occurrenceKey.sourceId)
                     selectedBlock = null
                 }
+            } else null,
+            onSetLockState = if (block.kind == BlockKind.EVENT) {
+                { lockState ->
+                    if (lockState == null) state.clearOverride(block.occurrenceKey)
+                    else state.setOverride(block.occurrenceKey, lockState)
+                    selectedBlock = null
+                }
             } else null
         )
     }
@@ -235,7 +242,11 @@ private fun ScheduledBlockRow(block: ScheduledBlock, onClick: () -> Unit) {
         headlineContent = { Text(block.title) },
         supportingContent = {
             val kind = if (block.kind == BlockKind.EVENT) "Class" else "Task"
-            Text("$kind · ${block.start.format(ROW_TIME_FORMAT)} – ${block.end.format(ROW_TIME_FORMAT)}")
+            val bits = buildList {
+                add("$kind · ${block.start.format(ROW_TIME_FORMAT)} – ${block.end.format(ROW_TIME_FORMAT)}")
+                block.deadline?.let { add("due $it") }
+            }
+            Text(bits.joinToString(" · "))
         }
     )
 }

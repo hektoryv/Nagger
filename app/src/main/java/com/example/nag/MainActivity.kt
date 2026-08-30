@@ -26,7 +26,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -57,7 +58,9 @@ import com.example.nag.ui.HabitDialog
 import com.example.nag.ui.PlannerLinkDialog
 import com.example.nag.ui.PromptDialog
 import com.example.nag.ui.TaskDialog
+import com.example.nag.ui.TasksScreen
 import com.example.nag.ui.TodayScreen
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 class MainActivity : ComponentActivity() {
@@ -104,6 +107,7 @@ private enum class Tab { TODAY, CALENDAR }
 fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit) {
     val context = LocalContext.current
     val today = LocalDate.now()
+    val coroutineScope = rememberCoroutineScope()
 
     var tab by remember { mutableStateOf(Tab.TODAY) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -113,6 +117,7 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
     var detailId by remember { mutableStateOf<String?>(null) }
     var plannerLinkOpen by remember { mutableStateOf(false) }
     var taskCreating by remember { mutableStateOf(false) }
+    var tasksScreenOpen by remember { mutableStateOf(false) }
 
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -175,6 +180,12 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
             onEdit = { editing = detail }
         )
         EditingDialogs(state, today, editing, { editing = it }, amountFor, { amountFor = it })
+        return
+    }
+
+    if (tasksScreenOpen) {
+        BackHandler { tasksScreenOpen = false }
+        TasksScreen(state = state, onBack = { tasksScreenOpen = false })
         return
     }
 
@@ -249,6 +260,23 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
                                 plannerLinkOpen = true
                             }
                         )
+                        if (state.plannerFeedUrl != null) {
+                            DropdownMenuItem(
+                                text = { Text(if (state.plannerSyncing) "Syncing…" else "Sync class schedule now") },
+                                enabled = !state.plannerSyncing,
+                                onClick = {
+                                    menuOpen = false
+                                    coroutineScope.launch { state.syncPlanner() }
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Manage tasks") },
+                            onClick = {
+                                menuOpen = false
+                                tasksScreenOpen = true
+                            }
+                        )
                     }
                 }
             )
@@ -271,12 +299,16 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
         },
         floatingActionButton = {
             when (tab) {
-                Tab.TODAY -> FloatingActionButton(onClick = { creating = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add a check-in")
-                }
-                Tab.CALENDAR -> FloatingActionButton(onClick = { taskCreating = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add a task")
-                }
+                Tab.TODAY -> ExtendedFloatingActionButton(
+                    onClick = { creating = true },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("Add check-in") }
+                )
+                Tab.CALENDAR -> ExtendedFloatingActionButton(
+                    onClick = { taskCreating = true },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("Add task") }
+                )
             }
         }
     ) { padding ->
@@ -338,6 +370,10 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
             onSave = { url ->
                 plannerLinkOpen = false
                 state.setFeedUrl(url)
+            },
+            onRemove = {
+                plannerLinkOpen = false
+                state.setFeedUrl(null)
             }
         )
     }

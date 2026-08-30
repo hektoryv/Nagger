@@ -88,4 +88,27 @@ object PlannerJson {
             else -> TaskRecurrence.None
         }
     }
+
+    fun overridesToString(overrides: Map<OccurrenceKey, LockState>): String =
+        JSONArray().apply {
+            overrides.forEach { (key, lockState) ->
+                put(
+                    JSONObject().apply {
+                        put("sourceId", key.sourceId)
+                        put("date", key.date.toString())
+                        put("state", lockState.name)
+                    }
+                )
+            }
+        }.toString()
+
+    fun overridesFromString(raw: String): Map<OccurrenceKey, LockState> = runCatching {
+        val array = JSONArray(raw)
+        (0 until array.length()).mapNotNull { i -> overrideEntryFromJson(array.getJSONObject(i)) }.toMap()
+    }.getOrDefault(emptyMap())
+
+    private fun overrideEntryFromJson(o: JSONObject): Pair<OccurrenceKey, LockState>? = runCatching {
+        val key = OccurrenceKey(o.getString("sourceId"), LocalDate.parse(o.getString("date")))
+        key to LockState.valueOf(o.getString("state"))
+    }.getOrNull()
 }

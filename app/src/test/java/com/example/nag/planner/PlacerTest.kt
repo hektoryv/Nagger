@@ -138,6 +138,15 @@ class PlacerTest {
     }
 
     @Test
+    fun `a placed task's deadline carries into its ScheduledBlock`() {
+        val task = PlannerTask(id = "t1", title = "Insurance", durationMinutes = 60, deadline = monday.plusDays(3))
+
+        val result = Placer.place(monday, emptyList(), listOf(task), PlannerOverrides(), dayShape)
+
+        assertEquals(monday.plusDays(3), result.single().deadline)
+    }
+
+    @Test
     fun `a times-per-week task never gets placed twice on the same day`() {
         val task = PlannerTask(
             id = "t1",

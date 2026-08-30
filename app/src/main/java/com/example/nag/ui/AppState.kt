@@ -11,6 +11,8 @@ import com.example.nag.logic.Schedule
 import com.example.nag.notify.Notifications
 import com.example.nag.notify.Scheduler
 import com.example.nag.planner.DayShape
+import com.example.nag.planner.LockState
+import com.example.nag.planner.OccurrenceKey
 import com.example.nag.planner.Placer
 import com.example.nag.planner.PlannerOverrides
 import com.example.nag.planner.PlannerStore
@@ -49,11 +51,17 @@ class AppState(private val context: Context) {
     var plannerTasks by mutableStateOf(PlannerStore.loadTasks(context))
         private set
 
+    var plannerOverrides by mutableStateOf(PlannerStore.loadOverrides(context))
+        private set
+
     var plannerSyncing by mutableStateOf(false)
         private set
 
     var plannerSyncError by mutableStateOf<String?>(null)
         private set
+
+    /** Not user-editable yet (see docs/FEATURES.md), but exposed so the UI can show the same values it plans around. */
+    val dayShape = DayShape()
 
     fun reload() {
         habits = Store.loadHabits(context)
@@ -63,6 +71,7 @@ class AppState(private val context: Context) {
         plannerFeedUrl = PlannerStore.loadFeedUrl(context)
         plannerEvents = PlannerStore.loadEvents(context)
         plannerTasks = PlannerStore.loadTasks(context)
+        plannerOverrides = PlannerStore.loadOverrides(context)
     }
 
     private fun afterChange() {
@@ -124,6 +133,11 @@ class AppState(private val context: Context) {
         val cleaned = url?.trim()?.ifBlank { null }
         PlannerStore.saveFeedUrl(context, cleaned)
         plannerFeedUrl = cleaned
+        if (cleaned == null) {
+            // No source left for these, so don't leave stale classes behind.
+            plannerEvents = emptyList()
+            PlannerStore.saveEvents(context, emptyList())
+        }
     }
 
     /** Fetches and parses the feed, then persists whatever it got. Call from a coroutine. */
@@ -156,9 +170,23 @@ class AppState(private val context: Context) {
         plannerTasks = updated
     }
 
+    /** Skip this occurrence, or make it flexible so the placer can move it — events only for now. */
+    fun setOverride(key: OccurrenceKey, lockState: LockState) {
+        val updated = plannerOverrides + (key to lockState)
+        PlannerStore.saveOverrides(context, updated)
+        plannerOverrides = updated
+    }
+
+    /** Back to whatever the source's default lock state is. */
+    fun clearOverride(key: OccurrenceKey) {
+        val updated = plannerOverrides - key
+        PlannerStore.saveOverrides(context, updated)
+        plannerOverrides = updated
+    }
+
     /** Locked events plus whatever the placer fits the flexible tasks around them. */
     fun plannerSchedule(weekStart: LocalDate): List<ScheduledBlock> =
-        Placer.place(weekStart, plannerEvents, plannerTasks, PlannerOverrides(), DayShape())
+        Placer.place(weekStart, plannerEvents, plannerTasks, PlannerOverrides(plannerOverrides), dayShape)
 
     /** Just [date]'s slice of its week's schedule — what the Today screen shows. */
     fun plannerScheduleForDay(date: LocalDate): List<ScheduledBlock> {

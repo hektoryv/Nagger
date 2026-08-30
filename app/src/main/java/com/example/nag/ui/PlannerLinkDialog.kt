@@ -25,7 +25,8 @@ fun PlannerLinkDialog(
     syncing: Boolean,
     error: String?,
     onDismiss: () -> Unit,
-    onSave: (String) -> Unit
+    onSave: (String) -> Unit,
+    onRemove: () -> Unit
 ) {
     var url by remember { mutableStateOf(existing ?: "") }
 
@@ -58,6 +59,11 @@ fun PlannerLinkDialog(
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 6.dp)
                     )
+                }
+                if (existing != null) {
+                    TextButton(onClick = onRemove, modifier = Modifier.padding(top = 4.dp)) {
+                        Text("Remove link", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         },

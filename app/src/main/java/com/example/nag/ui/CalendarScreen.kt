@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -51,11 +52,13 @@ import com.example.nag.data.Habit
 import com.example.nag.data.habitColorArgb
 import com.example.nag.logic.Schedule
 import com.example.nag.planner.BlockKind
+import com.example.nag.planner.DayShape
 import com.example.nag.planner.LockState
 import com.example.nag.planner.ScheduledBlock
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
@@ -119,6 +122,13 @@ fun CalendarScreen(
             onDelete = if (block.kind == BlockKind.TASK) {
                 {
                     state.deleteTask(block.occurrenceKey.sourceId)
+                    selectedBlock = null
+                }
+            } else null,
+            onSetLockState = if (block.kind == BlockKind.EVENT) {
+                { lockState ->
+                    if (lockState == null) state.clearOverride(block.occurrenceKey)
+                    else state.setOverride(block.occurrenceKey, lockState)
                     selectedBlock = null
                 }
             } else null
@@ -214,7 +224,9 @@ private fun WeekGrid(
     onDayClick: (LocalDate) -> Unit,
     onBlockClick: (ScheduledBlock) -> Unit
 ) {
-    val schedule = remember(state.plannerEvents, state.plannerTasks, weekStart) { state.plannerSchedule(weekStart) }
+    val schedule = remember(state.plannerEvents, state.plannerTasks, state.plannerOverrides, weekStart) {
+        state.plannerSchedule(weekStart)
+    }
 
     Column(Modifier.padding(horizontal = 6.dp)) {
         Row(Modifier.fillMaxWidth()) {
@@ -243,6 +255,7 @@ private fun WeekGrid(
                 val date = weekStart.plusDays(offset.toLong())
                 DayTimelineColumn(
                     blocks = schedule.filter { it.start.toLocalDate() == date },
+                    dayShape = state.dayShape,
                     onBlockClick = onBlockClick,
                     modifier = Modifier.weight(1f)
                 )
@@ -270,11 +283,14 @@ private fun HourGutter() {
 @Composable
 private fun DayTimelineColumn(
     blocks: List<ScheduledBlock>,
+    dayShape: DayShape,
     onBlockClick: (ScheduledBlock) -> Unit,
     modifier: Modifier
 ) {
     val totalHours = TIMELINE_END_HOUR - TIMELINE_START_HOUR
     val lineColor = MaterialTheme.colorScheme.outlineVariant
+    val dinnerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
+    val windDownColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
 
     Box(
         modifier
@@ -282,6 +298,20 @@ private fun DayTimelineColumn(
             .height(HOUR_HEIGHT * totalHours)
             .drawBehind {
                 val hourPx = HOUR_HEIGHT.toPx()
+                fun yFor(time: LocalTime): Float =
+                    ((time.hour - TIMELINE_START_HOUR) * 60 + time.minute) / 60f * hourPx
+
+                drawRect(
+                    dinnerColor,
+                    topLeft = Offset(0f, yFor(dayShape.dinnerStart)),
+                    size = Size(size.width, yFor(dayShape.dinnerEnd) - yFor(dayShape.dinnerStart))
+                )
+                drawRect(
+                    windDownColor,
+                    topLeft = Offset(0f, yFor(dayShape.windDownStart)),
+                    size = Size(size.width, size.height - yFor(dayShape.windDownStart))
+                )
+
                 for (hour in 0..totalHours) {
                     val y = hour * hourPx
                     drawLine(lineColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
@@ -390,14 +420,20 @@ private fun barColor(habit: Habit, status: DayStatus): Color {
 
 @Composable
 private fun Legend() {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        LegendItem("Done", MaterialTheme.colorScheme.primary)
-        LegendItem("Due", MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
-        LegendItem("Ahead", MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
-        LegendItem("Missed", MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            LegendItem("Done", MaterialTheme.colorScheme.primary)
+            LegendItem("Due", MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
+            LegendItem("Ahead", MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
+            LegendItem("Missed", MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f))
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            LegendItem("Locked", MaterialTheme.colorScheme.error)
+            LegendItem("Flexible", MaterialTheme.colorScheme.outline)
+            LegendItem("Dinner", MaterialTheme.colorScheme.tertiaryContainer)
+            LegendItem("Wind-down", MaterialTheme.colorScheme.surfaceVariant)
+        }
     }
 }
 

@@ -32,24 +32,38 @@ import androidx.compose.ui.unit.dp
 import com.example.nag.planner.PlannerTask
 import com.example.nag.planner.TaskRecurrence
 import java.time.LocalDate
+import java.util.UUID
 
 private enum class RepeatChoice { ONCE, DAILY, TIMES_PER_WEEK }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TaskDialog(
+    existing: PlannerTask? = null,
     onDismiss: () -> Unit,
-    onSave: (PlannerTask) -> Unit
+    onSave: (PlannerTask) -> Unit,
+    onDelete: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    var confirmingDelete by remember { mutableStateOf(false) }
 
-    var title by remember { mutableStateOf("") }
-    var hours by remember { mutableStateOf("1") }
-    var minutes by remember { mutableStateOf("0") }
-    var repeatKind by remember { mutableStateOf(RepeatChoice.ONCE) }
-    var timesPerWeek by remember { mutableStateOf("2") }
-    var hasDeadline by remember { mutableStateOf(false) }
-    var deadline by remember { mutableStateOf<LocalDate?>(null) }
+    var title by remember { mutableStateOf(existing?.title ?: "") }
+    var hours by remember { mutableStateOf(((existing?.durationMinutes ?: 60) / 60).toString()) }
+    var minutes by remember { mutableStateOf(((existing?.durationMinutes ?: 60) % 60).toString()) }
+    var repeatKind by remember {
+        mutableStateOf(
+            when (existing?.recurrence) {
+                null, TaskRecurrence.None -> RepeatChoice.ONCE
+                TaskRecurrence.Daily -> RepeatChoice.DAILY
+                is TaskRecurrence.TimesPerWeek -> RepeatChoice.TIMES_PER_WEEK
+            }
+        )
+    }
+    var timesPerWeek by remember {
+        mutableStateOf((existing?.recurrence as? TaskRecurrence.TimesPerWeek)?.count?.toString() ?: "2")
+    }
+    var hasDeadline by remember { mutableStateOf(existing?.deadline != null) }
+    var deadline by remember { mutableStateOf(existing?.deadline) }
 
     val durationMinutes = (hours.toIntOrNull() ?: 0) * 60 + (minutes.toIntOrNull() ?: 0)
     val timesPerWeekCount = (timesPerWeek.toIntOrNull() ?: 0).coerceIn(1, 7)
@@ -59,7 +73,7 @@ fun TaskDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New task") },
+        title = { Text(if (existing == null) "New task" else "Edit task") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -155,6 +169,7 @@ fun TaskDialog(
                 onClick = {
                     onSave(
                         PlannerTask(
+                            id = existing?.id ?: UUID.randomUUID().toString(),
                             title = title.trim(),
                             durationMinutes = durationMinutes,
                             deadline = if (hasDeadline) deadline else null,
@@ -168,6 +183,32 @@ fun TaskDialog(
                 }
             ) { Text("Save") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        dismissButton = {
+            Row {
+                if (onDelete != null) {
+                    TextButton(onClick = { confirmingDelete = true }) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
     )
+
+    if (confirmingDelete && onDelete != null) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete ${existing?.title ?: title}?") },
+            text = { Text("This can't be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmingDelete = false
+                    onDelete()
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingDelete = false }) { Text("Keep it") }
+            }
+        )
+    }
 }

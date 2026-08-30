@@ -2,10 +2,13 @@ package com.example.nag.ui
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,7 +33,8 @@ private val BLOCK_DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("E
 fun ScheduledBlockDialog(
     block: ScheduledBlock,
     onDismiss: () -> Unit,
-    onDelete: (() -> Unit)?
+    onDelete: (() -> Unit)? = null,
+    onSetLockState: ((LockState?) -> Unit)? = null
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -45,6 +49,7 @@ fun ScheduledBlockDialog(
                 )
                 BlockInfoRow("Duration", formatBlockDuration(Duration.between(block.start, block.end)))
                 block.location?.let { BlockInfoRow("Location", it) }
+                block.deadline?.let { BlockInfoRow("Deadline", it.format(BLOCK_DAY_FORMAT)) }
                 BlockInfoRow(
                     "Status",
                     when (block.lockState) {
@@ -53,6 +58,34 @@ fun ScheduledBlockDialog(
                         LockState.SKIPPED -> "Skipped"
                     }
                 )
+
+                if (onSetLockState != null) {
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "For just this occurrence — the rest of this class is unaffected.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row {
+                        if (block.lockState != LockState.FLEXIBLE) {
+                            TextButton(onClick = { onSetLockState(LockState.FLEXIBLE) }) {
+                                Text("Make flexible")
+                            }
+                        }
+                        if (block.lockState != LockState.SKIPPED) {
+                            TextButton(onClick = { onSetLockState(LockState.SKIPPED) }) {
+                                Text("Skip")
+                            }
+                        }
+                        if (block.lockState != LockState.LOCKED) {
+                            TextButton(onClick = { onSetLockState(null) }) {
+                                Text("Reset to locked")
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },

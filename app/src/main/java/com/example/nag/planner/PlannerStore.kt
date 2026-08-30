@@ -9,6 +9,7 @@ object PlannerStore {
     private const val KEY_FEED_URL = "feed_url"
     private const val KEY_EVENTS = "events"
     private const val KEY_TASKS = "tasks"
+    private const val KEY_OVERRIDES = "overrides"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -36,5 +37,14 @@ object PlannerStore {
 
     fun saveTasks(context: Context, tasks: List<PlannerTask>) {
         prefs(context).edit().putString(KEY_TASKS, PlannerJson.tasksToString(tasks)).apply()
+    }
+
+    fun loadOverrides(context: Context): Map<OccurrenceKey, LockState> {
+        val raw = prefs(context).getString(KEY_OVERRIDES, null) ?: return emptyMap()
+        return PlannerJson.overridesFromString(raw)
+    }
+
+    fun saveOverrides(context: Context, overrides: Map<OccurrenceKey, LockState>) {
+        prefs(context).edit().putString(KEY_OVERRIDES, PlannerJson.overridesToString(overrides)).apply()
     }
 }
