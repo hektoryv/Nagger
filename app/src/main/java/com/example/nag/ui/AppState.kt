@@ -214,14 +214,19 @@ class AppState(private val context: Context) {
      * through [PlannerScheduler] rather than calling [Placer] directly so a one-off
      * task, once placed, stays on the day it was placed rather than being re-decided
      * every time a different week is viewed.
+     *
+     * Deliberately does NOT touch [plannerTaskAssignments] here: this is called from
+     * inside a Compose `remember(..., state.plannerTaskAssignments, ...)` block, and a
+     * function writing the very state its caller is keyed on, while that caller is
+     * computing, is a self-referential trap — it left the week view stuck showing a
+     * stale position after a move until something unrelated (switching tabs) forced a
+     * full recomposition. Every actual mutation (move/recalculate/edit/delete) already
+     * updates the field itself; this function only needs to read, not write.
      */
-    fun plannerSchedule(weekStart: LocalDate, today: LocalDate): List<ScheduledBlock> {
-        val result = PlannerScheduler.schedule(
+    fun plannerSchedule(weekStart: LocalDate, today: LocalDate): List<ScheduledBlock> =
+        PlannerScheduler.schedule(
             context, weekStart, today, plannerEvents, plannerTasks, PlannerOverrides(plannerOverrides), dayShape
         )
-        plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
-        return result
-    }
 
     /** Just [date]'s slice of its week's schedule — what the Today screen shows. [date] is today. */
     fun plannerScheduleForDay(date: LocalDate): List<ScheduledBlock> {
@@ -242,10 +247,16 @@ class AppState(private val context: Context) {
         NagWidget.refresh(context)
     }
 
-    /** Pins an already-placed one-off task to a new time the user chose, without re-running the placer. */
+    /**
+     * Pins an already-placed one-off task to a new day/time the user chose (by dialog
+     * or by drag), without re-running the placer. Pushes any other one-off task it now
+     * overlaps to a free slot the same day.
+     */
     fun moveTaskAssignment(taskId: String, newStart: LocalDateTime) {
         val duration = plannerTasks.firstOrNull { it.id == taskId }?.durationMinutes ?: return
-        PlannerScheduler.moveTaskAssignment(context, taskId, newStart, duration)
+        PlannerScheduler.moveTaskAssignment(
+            context, taskId, newStart, duration, plannerEvents, PlannerOverrides(plannerOverrides), dayShape
+        )
         plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
     }
 }

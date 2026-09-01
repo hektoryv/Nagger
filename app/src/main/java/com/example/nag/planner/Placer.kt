@@ -107,8 +107,12 @@ object Placer {
         }
     }
 
-    /** First gap on [day], at or after [DayShape.dayStart] and before wind-down, that fits [durationMinutes]. */
-    private fun findSlot(
+    /**
+     * First gap on [day], at or after [DayShape.dayStart] and before wind-down, that
+     * fits [durationMinutes]. Internal rather than private: [PlannerScheduler] reuses
+     * this exact logic to find a new home for a task that a manual move just displaced.
+     */
+    internal fun findSlot(
         day: LocalDate,
         durationMinutes: Int,
         dayShape: DayShape,

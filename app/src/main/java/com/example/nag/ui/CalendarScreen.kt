@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -285,18 +286,16 @@ private fun WeekGrid(
 
         Row(Modifier.fillMaxWidth()) {
             HourGutter()
-            repeat(7) { offset ->
-                val date = weekStart.plusDays(offset.toLong())
-                DayTimelineColumn(
-                    blocks = schedule.filter { it.start.toLocalDate() == date },
-                    completions = state.plannerCompletions,
-                    dayShape = state.dayShape,
-                    onBlockClick = onBlockClick,
-                    isMovable = { block -> isMovableTask(state, block) },
-                    onBlockMove = { block, newStart -> state.moveTaskAssignment(block.occurrenceKey.sourceId, newStart) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
+            WeekTimeline(
+                weekStart = weekStart,
+                schedule = schedule,
+                completions = state.plannerCompletions,
+                dayShape = state.dayShape,
+                onBlockClick = onBlockClick,
+                isMovable = { block -> isMovableTask(state, block) },
+                onBlockMove = { block, newStart -> state.moveTaskAssignment(block.occurrenceKey.sourceId, newStart) },
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -317,9 +316,15 @@ private fun HourGutter() {
     }
 }
 
+/**
+ * All seven days drawn on one shared canvas rather than as seven independent columns,
+ * so a held block can be dragged both up/down (a new time) and left/right (a new day)
+ * instead of being confined to the column it started in.
+ */
 @Composable
-private fun DayTimelineColumn(
-    blocks: List<ScheduledBlock>,
+private fun WeekTimeline(
+    weekStart: LocalDate,
+    schedule: List<ScheduledBlock>,
     completions: Set<OccurrenceKey>,
     dayShape: DayShape,
     onBlockClick: (ScheduledBlock) -> Unit,
@@ -329,43 +334,63 @@ private fun DayTimelineColumn(
 ) {
     val totalHours = TIMELINE_END_HOUR - TIMELINE_START_HOUR
     val lineColor = MaterialTheme.colorScheme.outlineVariant
+    val dayBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
     val dinnerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
     val windDownColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    val density = LocalDensity.current
 
-    Box(
+    BoxWithConstraints(
         modifier
             .fillMaxWidth()
             .height(HOUR_HEIGHT * totalHours)
-            .drawBehind {
-                val hourPx = HOUR_HEIGHT.toPx()
-                fun yFor(time: LocalTime): Float =
-                    ((time.hour - TIMELINE_START_HOUR) * 60 + time.minute) / 60f * hourPx
-
-                drawRect(
-                    dinnerColor,
-                    topLeft = Offset(0f, yFor(dayShape.dinnerStart)),
-                    size = Size(size.width, yFor(dayShape.dinnerEnd) - yFor(dayShape.dinnerStart))
-                )
-                drawRect(
-                    windDownColor,
-                    topLeft = Offset(0f, yFor(dayShape.windDownStart)),
-                    size = Size(size.width, size.height - yFor(dayShape.windDownStart))
-                )
-
-                for (hour in 0..totalHours) {
-                    val y = hour * hourPx
-                    drawLine(lineColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
-                }
-            }
     ) {
-        blocks.forEach { block ->
-            ScheduledBlockView(
-                block,
-                isDone = block.occurrenceKey in completions,
-                isMovable = isMovable(block),
-                onClick = { onBlockClick(block) },
-                onMove = { newStart -> onBlockMove(block, newStart) }
-            )
+        val columnWidthPx = with(density) { maxWidth.toPx() } / 7f
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    val hourPx = HOUR_HEIGHT.toPx()
+                    fun yFor(time: LocalTime): Float =
+                        ((time.hour - TIMELINE_START_HOUR) * 60 + time.minute) / 60f * hourPx
+
+                    for (day in 0 until 7) {
+                        val x = day * columnWidthPx
+                        drawRect(
+                            dinnerColor,
+                            topLeft = Offset(x, yFor(dayShape.dinnerStart)),
+                            size = Size(columnWidthPx, yFor(dayShape.dinnerEnd) - yFor(dayShape.dinnerStart))
+                        )
+                        drawRect(
+                            windDownColor,
+                            topLeft = Offset(x, yFor(dayShape.windDownStart)),
+                            size = Size(columnWidthPx, size.height - yFor(dayShape.windDownStart))
+                        )
+                    }
+                    for (hour in 0..totalHours) {
+                        val y = hour * hourPx
+                        drawLine(lineColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                    }
+                    for (day in 1 until 7) {
+                        val x = day * columnWidthPx
+                        drawLine(dayBorderColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+                    }
+                }
+        )
+
+        schedule.forEach { block ->
+            val dayIndex = (block.start.toLocalDate().toEpochDay() - weekStart.toEpochDay()).toInt()
+            if (dayIndex in 0..6) {
+                ScheduledBlockView(
+                    block = block,
+                    dayIndex = dayIndex,
+                    columnWidthPx = columnWidthPx,
+                    isDone = block.occurrenceKey in completions,
+                    isMovable = isMovable(block),
+                    onClick = { onBlockClick(block) },
+                    onMove = { newStart -> onBlockMove(block, newStart) }
+                )
+            }
         }
     }
 }
@@ -373,12 +398,15 @@ private fun DayTimelineColumn(
 /**
  * Hold-and-drag to move a flexible task: a normal tap still opens the detail dialog,
  * but a long-press-then-drag (only wired up for movable blocks — see [isMovableTask])
- * slides the block up/down within the same day and snaps to the nearest 15 minutes on
- * release. Dragging across days isn't supported, only within the day it's already on.
+ * slides the block anywhere in the week grid — a new time, a new day, or both —
+ * snapping to the nearest 15 minutes and nearest day column on release. Dims while
+ * dragging for feedback.
  */
 @Composable
 private fun ScheduledBlockView(
     block: ScheduledBlock,
+    dayIndex: Int,
+    columnWidthPx: Float,
     isDone: Boolean,
     isMovable: Boolean,
     onClick: () -> Unit,
@@ -396,18 +424,21 @@ private fun ScheduledBlockView(
 
     val hourPx = with(density) { HOUR_HEIGHT.toPx() }
     val topPx = startMinutes / 60f * hourPx
+    val leftPx = dayIndex * columnWidthPx
     val blockHeightPx = with(density) { blockHeight.toPx() }
     val timelineHeightPx = totalMinutes / 60f * hourPx
     val maxTopPx = (timelineHeightPx - blockHeightPx).coerceAtLeast(0f)
+    val maxLeftPx = (6 * columnWidthPx).coerceAtLeast(0f)
 
-    var dragOffsetPx by remember(block.occurrenceKey) { mutableStateOf(0f) }
+    var dragOffsetX by remember(block.occurrenceKey) { mutableStateOf(0f) }
+    var dragOffsetY by remember(block.occurrenceKey) { mutableStateOf(0f) }
     var dragging by remember(block.occurrenceKey) { mutableStateOf(false) }
 
     Box(
         Modifier
-            .fillMaxWidth()
+            .width(with(density) { columnWidthPx.toDp() })
             .height(blockHeight)
-            .offset { IntOffset(0, (topPx + dragOffsetPx).roundToInt()) }
+            .offset { IntOffset((leftPx + dragOffsetX).roundToInt(), (topPx + dragOffsetY).roundToInt()) }
             .padding(horizontal = 1.dp, vertical = 0.5.dp)
             .clip(RoundedCornerShape(3.dp))
             .background(MaterialTheme.colorScheme.secondaryContainer)
@@ -421,26 +452,32 @@ private fun ScheduledBlockView(
                             onDragStart = { dragging = true },
                             onDragEnd = {
                                 dragging = false
-                                val draggedMinutes = (dragOffsetPx / hourPx * 60f).roundToInt()
-                                val snapped = (draggedMinutes / 15f).roundToInt() * 15
+                                val draggedMinutes = (dragOffsetY / hourPx * 60f).roundToInt()
+                                val snappedMinutes = (draggedMinutes / 15f).roundToInt() * 15
                                 val minMinuteOfDay = TIMELINE_START_HOUR * 60
                                 val maxMinuteOfDay = (TIMELINE_END_HOUR * 60 - durationMinutes)
                                     .coerceAtLeast(minMinuteOfDay)
                                 val actualStartMinuteOfDay = block.start.hour * 60 + block.start.minute
-                                val proposed = actualStartMinuteOfDay + snapped
-                                val clamped = proposed.coerceIn(minMinuteOfDay, maxMinuteOfDay)
-                                dragOffsetPx = 0f
-                                onMove(
-                                    LocalDateTime.of(block.start.toLocalDate(), LocalTime.of(clamped / 60, clamped % 60))
-                                )
+                                val proposedMinute = actualStartMinuteOfDay + snappedMinutes
+                                val clampedMinute = proposedMinute.coerceIn(minMinuteOfDay, maxMinuteOfDay)
+
+                                val draggedDays = (dragOffsetX / columnWidthPx).roundToInt()
+                                val newDayIndex = (dayIndex + draggedDays).coerceIn(0, 6)
+                                val newDate = block.start.toLocalDate().plusDays((newDayIndex - dayIndex).toLong())
+
+                                dragOffsetX = 0f
+                                dragOffsetY = 0f
+                                onMove(LocalDateTime.of(newDate, LocalTime.of(clampedMinute / 60, clampedMinute % 60)))
                             },
                             onDragCancel = {
                                 dragging = false
-                                dragOffsetPx = 0f
+                                dragOffsetX = 0f
+                                dragOffsetY = 0f
                             },
                             onDrag = { change, dragAmount ->
                                 change.consume()
-                                dragOffsetPx = (dragOffsetPx + dragAmount.y).coerceIn(-topPx, maxTopPx - topPx)
+                                dragOffsetX = (dragOffsetX + dragAmount.x).coerceIn(-leftPx, maxLeftPx - leftPx)
+                                dragOffsetY = (dragOffsetY + dragAmount.y).coerceIn(-topPx, maxTopPx - topPx)
                             }
                         )
                     }

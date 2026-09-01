@@ -12,8 +12,9 @@ that adds, renames, or removes a user-facing control.** "User-facing control" me
 anything a real tap/screen touches — a button, a field, a menu item, a section of a
 screen — not internal refactors.
 
-Last updated: after adding hold-and-drag to move a flexible task in the week timeline
-(commit history around `9000053` and the fixes that follow it).
+Last updated: after cross-day dragging, push-away collision handling, and a fix for
+the week view not refreshing after a move (commit history around `9000053` and the
+fixes that follow it).
 
 ---
 
@@ -67,14 +68,16 @@ Last updated: after adding hold-and-drag to move a flexible task in the week tim
 - Day header row: weekday letters, day-of-month + habit status dot bars per day; tap a
   day → day-detail dialog (lists habits due/done/missed that day; checkbox to toggle,
   disabled for future dates).
-- Week timeline: an hour-by-hour (06:00–24:00) grid, one column per day, showing every
-  `ScheduledBlock` for that day positioned by actual start time/duration, plus shaded
-  dinner and wind-down bands (from the current day shape). Locked blocks (classes, by
-  default) get a **red border**; flexible blocks (tasks) get a neutral outline. Tap any
-  block → the shared scheduled-block detail dialog. A one-off task's block can also be
-  **held and dragged** up/down to a new time within the same day (see "How the schedule
-  stays current"); it dims while dragging and snaps to the nearest 15 minutes on
-  release.
+- Week timeline: an hour-by-hour (06:00–24:00) grid spanning all 7 days as one shared
+  canvas, showing every `ScheduledBlock` positioned by actual day/start time/duration,
+  plus shaded dinner and wind-down bands per day (from the current day shape). Locked
+  blocks (classes, by default) get a **red border**; flexible blocks (tasks) get a
+  neutral outline. Tap any block → the shared scheduled-block detail dialog. A one-off
+  task's block can also be **held and dragged** anywhere in the grid — a new time, a
+  new day, or both — snapping to the nearest 15 minutes and nearest day column on
+  release (see "How the schedule stays current"); it dims while dragging. If the new
+  spot overlaps another already-placed one-off task, that other task gets pushed to
+  the next free slot the same day rather than sitting underneath it.
 - Legend: two rows — Done/Due/Ahead/Missed (habit dots), and Locked/Flexible/Dinner/
   Wind-down (timeline blocks and bands).
 
@@ -109,9 +112,9 @@ English), Done (tasks only, Yes/Not yet). Buttons shown depending on context:
 - **Mark done / Mark not done** — tasks only.
 - **Move to a specific time** — one-off (not recurring) tasks only, and only once
   they've actually been placed. Opens the Android time picker; keeps the same day,
-  changes the time. Same result as holding and dragging the block in the week
-  timeline, just typed instead of dragged. See "How the schedule stays current" for
-  what this does and does not survive.
+  changes the time (dragging in the week timeline is the equivalent for changing the
+  day too — this button is a typed, same-day-only alternative). See "How the schedule
+  stays current" for what this does and does not survive.
 - **Make flexible / Skip / Reset to locked** — classes only, per occurrence; the rest
   of that recurring class is unaffected.
 - **Delete task** — tasks only.
@@ -168,24 +171,32 @@ it won't show a one-off task somewhere different than the app does.
 - **Editing a task** (duration, deadline, etc.) clears its existing placement for the
   same reason — the old slot may no longer be the right size or before/after the new
   deadline.
-- **Moving a task manually** — by dialog or by drag — doesn't check for overlaps with
-  other blocks or respect dinner/wind-down; it trusts the time you pick, the same way a
-  class's "Make flexible"/"Skip" trusts the choice you make. Dragging is also
-  same-day-only — there's no way to drag a block to a different day, only to a
-  different time within the day it's already on.
+- **Moving a task manually** — by dialog or by drag — doesn't check against dinner/
+  wind-down (it trusts the time you pick, the same way a class's "Make flexible"/"Skip"
+  trusts the choice you make), but it does check against other one-off tasks: one that
+  now overlaps the moved task gets pushed to the next free slot the same day, the same
+  way the placer would have found it a spot originally. If there's no free slot left
+  that day, the pushed task is left overlapping rather than losing its placement.
+  Locked events are never pushed, and a recurring task's occurrence (not persisted,
+  see above) can still silently overlap a moved one-off task — that's a real remaining
+  gap, not handled by the push-away logic.
 
 ---
 
 ## Known gaps (confirmed by reading the code, not memory — check off as fixed)
 
-- **Moving a task (drag or dialog) only changes the time of day, not the date or the
-  day**, and only exists for one-off tasks — a recurring task's occurrence has no
-  persisted slot to move at all (see "How the schedule stays current"). Dragging to a
-  different day isn't supported. **Not yet verified on a real device** — the drag
-  gesture (long-press-then-drag, `detectDragGesturesAfterLongPress`) was written and
-  reviewed carefully but the sandbox this was built in can't run the app to confirm it
-  feels right alongside the screen's vertical scroll; say if it fights the scroll,
-  feels laggy, or the snap increment is wrong.
+- **Moving a task only exists for one-off tasks** — a recurring task's occurrence has
+  no persisted slot to move at all, whether by drag or by the dialog button (see "How
+  the schedule stays current").
+- **Push-away doesn't account for recurring task occurrences**, only other one-off
+  tasks — a recurring task can still silently overlap a task that was just dragged
+  onto it. Locked events are never pushed (correct — they shouldn't move).
+- **Not yet verified on a real device** — the drag gesture (long-press-then-drag,
+  `detectDragGesturesAfterLongPress`, now tracking both the day column and the time)
+  was written and reviewed carefully but the sandbox this was built in can't run the
+  app to confirm it feels right alongside the screen's vertical scroll, that the
+  column-width math lines up with the visible grid, or that push-away looks right when
+  it happens; say if any of that feels off.
 - **Dinner/wind-down aren't adjustable by long-pressing them directly in the week
   view**, as originally asked for — they're a global setting, changed instead through
   the menu-based **Day shape** dialog (a per-day-instance long-press would be a
@@ -197,3 +208,13 @@ it won't show a one-off task somewhere different than the app does.
   still shift if you view the same week again after adding/removing something else
   that week (expected — only the day, driven by the weekly quota, is meant to be
   stable; the exact minute isn't promised).
+
+## Fixed this round
+
+- **A moved task's block used to visually disappear until switching tabs and back.**
+  Root cause: `AppState.plannerSchedule()` was writing to `plannerTaskAssignments` as
+  a side effect, but that same field is also a dependency key of the Compose
+  `remember` block that calls `plannerSchedule()` — a function writing the very state
+  its caller is keyed on, while the caller is computing, is a self-referential trap
+  that left the week view stuck on a stale render. Fixed by making `plannerSchedule()`
+  a pure read; every actual mutation already updated the field itself independently.

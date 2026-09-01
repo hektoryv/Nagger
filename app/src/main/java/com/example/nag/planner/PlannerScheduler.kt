@@ -1,7 +1,9 @@
 package com.example.nag.planner
 
 import android.content.Context
+import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
 
 /**
  * Wraps [Placer] with a persisted record of where each one-off task has already been
@@ -55,15 +57,65 @@ object PlannerScheduler {
         PlannerStore.saveTaskAssignments(context, kept)
     }
 
-    /** Pins a one-off task's already-placed occurrence to a new start time, without re-running the placer. */
-    fun moveTaskAssignment(context: Context, taskId: String, newStart: java.time.LocalDateTime, durationMinutes: Int) {
-        val assignments = PlannerStore.loadTaskAssignments(context)
+    /**
+     * Pins a one-off task's already-placed occurrence to a new start time (any date —
+     * this is also how a drag across days lands), without re-running the placer for
+     * everything. Any other already-placed one-off task the move now overlaps gets
+     * pushed to the next free slot that same day, same as the placer would have found
+     * it a spot originally; a locked event is never pushed, and if no free slot exists
+     * the pushed task is left overlapping rather than losing its placement entirely.
+     */
+    fun moveTaskAssignment(
+        context: Context,
+        taskId: String,
+        newStart: LocalDateTime,
+        durationMinutes: Int,
+        events: List<PlannerEvent>,
+        overrides: PlannerOverrides,
+        dayShape: DayShape
+    ) {
+        val assignments = PlannerStore.loadTaskAssignments(context).toMutableMap()
         val existing = assignments[taskId] ?: return
+        val newEnd = newStart.plusMinutes(durationMinutes.toLong())
+        val date = newStart.toLocalDate()
         val moved = existing.copy(
-            occurrenceKey = OccurrenceKey(taskId, newStart.toLocalDate()),
+            occurrenceKey = OccurrenceKey(taskId, date),
             start = newStart,
-            end = newStart.plusMinutes(durationMinutes.toLong())
+            end = newEnd
         )
-        PlannerStore.saveTaskAssignments(context, assignments + (taskId to moved))
+        assignments[taskId] = moved
+
+        val dayEvents = events.mapNotNull { event ->
+            val eventDate = event.start.toLocalDate()
+            if (eventDate != date) return@mapNotNull null
+            val key = OccurrenceKey(event.id, eventDate)
+            val lockState = overrides.lockStateFor(key, BlockKind.EVENT)
+            if (lockState == LockState.SKIPPED) return@mapNotNull null
+            ScheduledBlock(key, BlockKind.EVENT, event.title, event.start, event.end, lockState, event.location)
+        }
+
+        val overlapping = assignments.values.filter { other ->
+            other.occurrenceKey.sourceId != taskId &&
+                other.start.toLocalDate() == date &&
+                other.start < newEnd && newStart < other.end
+        }
+
+        for (other in overlapping) {
+            val otherId = other.occurrenceKey.sourceId
+            val otherDuration = Duration.between(other.start, other.end).toMinutes().toInt()
+            val busy = dayEvents + assignments.values.filter {
+                it.occurrenceKey.sourceId != otherId && it.start.toLocalDate() == date
+            }
+            val slot = Placer.findSlot(date, otherDuration, dayShape, busy)
+            if (slot != null) {
+                assignments[otherId] = other.copy(
+                    occurrenceKey = OccurrenceKey(otherId, slot.first.toLocalDate()),
+                    start = slot.first,
+                    end = slot.second
+                )
+            }
+        }
+
+        PlannerStore.saveTaskAssignments(context, assignments)
     }
 }
