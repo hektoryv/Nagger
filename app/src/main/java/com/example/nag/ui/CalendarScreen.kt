@@ -47,7 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.graphicsLayer
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -484,7 +484,7 @@ private fun ScheduledBlockView(
             .width(with(density) { columnWidthPx.toDp() })
             .height(blockHeight)
             .offset { IntOffset((leftPx + dragOffsetX).roundToInt(), (topPx + dragOffsetY).roundToInt()) }
-            .graphicsLayer { rotationZ = shakeAngle.value }
+            .rotate(shakeAngle.value)
             .padding(horizontal = 1.dp, vertical = 0.5.dp)
             .clip(RoundedCornerShape(3.dp))
             .background(MaterialTheme.colorScheme.secondaryContainer)
