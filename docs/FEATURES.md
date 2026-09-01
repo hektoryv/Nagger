@@ -12,9 +12,9 @@ that adds, renames, or removes a user-facing control.** "User-facing control" me
 anything a real tap/screen touches — a button, a field, a menu item, a section of a
 screen — not internal refactors.
 
-Last updated: after cross-day dragging, push-away collision handling, and a fix for
-the week view not refreshing after a move (commit history around `9000053` and the
-fixes that follow it).
+Last updated: after forward-preferring push-away, an Edit action on the block dialog,
+and a drag shake animation (commit history around `9000053` and the fixes that follow
+it).
 
 ---
 
@@ -75,9 +75,11 @@ fixes that follow it).
   neutral outline. Tap any block → the shared scheduled-block detail dialog. A one-off
   task's block can also be **held and dragged** anywhere in the grid — a new time, a
   new day, or both — snapping to the nearest 15 minutes and nearest day column on
-  release (see "How the schedule stays current"); it dims while dragging. If the new
-  spot overlaps another already-placed one-off task, that other task gets pushed to
-  the next free slot the same day rather than sitting underneath it.
+  release (see "How the schedule stays current"); it dims and jiggles side to side
+  while held, like an app icon in jiggle mode, and goes still the instant it's dropped.
+  If the new spot overlaps another already-placed one-off task, that other task gets
+  pushed to the next free slot right after it that same day (not just wherever's
+  earliest in the day) rather than sitting underneath it.
 - Legend: two rows — Done/Due/Ahead/Missed (habit dots), and Locked/Flexible/Dinner/
   Wind-down (timeline blocks and bands).
 
@@ -110,6 +112,10 @@ Shows: Type (Class/Task), Day, Time span, Duration, Location (classes only, if
 present), Deadline (tasks only, if set), Status (Locked / Flexible / Skipped, in plain
 English), Done (tasks only, Yes/Not yet). Buttons shown depending on context:
 - **Mark done / Mark not done** — tasks only.
+- **Edit task** — tasks only; opens the task dialog (see below) pre-filled, so title,
+  duration, repeat, and deadline can all be changed without going through Manage
+  tasks. Changing duration/deadline clears the task's current placement the same way
+  editing from Manage tasks does — see "How the schedule stays current".
 - **Move to a specific time** — one-off (not recurring) tasks only, and only once
   they've actually been placed. Opens the Android time picker; keeps the same day,
   changes the time (dragging in the week timeline is the equivalent for changing the
@@ -174,12 +180,13 @@ it won't show a one-off task somewhere different than the app does.
 - **Moving a task manually** — by dialog or by drag — doesn't check against dinner/
   wind-down (it trusts the time you pick, the same way a class's "Make flexible"/"Skip"
   trusts the choice you make), but it does check against other one-off tasks: one that
-  now overlaps the moved task gets pushed to the next free slot the same day, the same
-  way the placer would have found it a spot originally. If there's no free slot left
-  that day, the pushed task is left overlapping rather than losing its placement.
-  Locked events are never pushed, and a recurring task's occurrence (not persisted,
-  see above) can still silently overlap a moved one-off task — that's a real remaining
-  gap, not handled by the push-away logic.
+  now overlaps the moved task gets pushed forward to the next free slot right after
+  it, same day — the closest spot into the future, not just whatever's earliest in the
+  day — falling back to the first free slot anywhere that day if nothing later fits.
+  If there's no free slot left at all, the pushed task is left overlapping rather than
+  losing its placement. Locked events are never pushed, and a recurring task's
+  occurrence (not persisted, see above) can still silently overlap a moved one-off
+  task — that's a real remaining gap, not handled by the push-away logic.
 
 ---
 
@@ -191,12 +198,14 @@ it won't show a one-off task somewhere different than the app does.
 - **Push-away doesn't account for recurring task occurrences**, only other one-off
   tasks — a recurring task can still silently overlap a task that was just dragged
   onto it. Locked events are never pushed (correct — they shouldn't move).
-- **Not yet verified on a real device** — the drag gesture (long-press-then-drag,
-  `detectDragGesturesAfterLongPress`, now tracking both the day column and the time)
-  was written and reviewed carefully but the sandbox this was built in can't run the
-  app to confirm it feels right alongside the screen's vertical scroll, that the
-  column-width math lines up with the visible grid, or that push-away looks right when
-  it happens; say if any of that feels off.
+- **Not yet verified on a real device** — the drag gesture, the shake animation while
+  held, and the forward-preferring push-away were all written and reviewed carefully
+  but the sandbox this was built in can't run the app to confirm the feel: whether the
+  drag still fights the screen's vertical scroll, whether it's stable when dropped
+  onto another block (an earlier round of this had the moved block appear to revert —
+  push-away now searches from right after the moved block's new end time instead of
+  from the start of the day, which should be steadier, but say if it still looks off),
+  or whether the shake reads as "currently held" rather than as jitter.
 - **Dinner/wind-down aren't adjustable by long-pressing them directly in the week
   view**, as originally asked for — they're a global setting, changed instead through
   the menu-based **Day shape** dialog (a per-day-instance long-press would be a

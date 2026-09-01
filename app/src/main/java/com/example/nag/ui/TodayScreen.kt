@@ -37,6 +37,7 @@ import com.example.nag.data.Habit
 import com.example.nag.data.habitColorArgb
 import com.example.nag.logic.Schedule
 import com.example.nag.planner.BlockKind
+import com.example.nag.planner.PlannerTask
 import com.example.nag.planner.ScheduledBlock
 import com.example.nag.planner.TaskRecurrence
 import java.time.LocalDate
@@ -63,6 +64,7 @@ fun TodayScreen(
     val finished = state.habits.filter { it.finished }
     val schedule = state.plannerScheduleForDay(today).sortedBy { it.start }
     var selectedBlock by remember { mutableStateOf<ScheduledBlock?>(null) }
+    var editingTask by remember { mutableStateOf<PlannerTask?>(null) }
 
     Column(
         Modifier
@@ -188,7 +190,29 @@ fun TodayScreen(
                     state.moveTaskAssignment(block.occurrenceKey.sourceId, newStart)
                     selectedBlock = null
                 }
+            } else null,
+            onEdit = if (block.kind == BlockKind.TASK) {
+                {
+                    editingTask = state.plannerTasks.firstOrNull { it.id == block.occurrenceKey.sourceId }
+                    selectedBlock = null
+                }
             } else null
+        )
+    }
+
+    val editing = editingTask
+    if (editing != null) {
+        TaskDialog(
+            existing = editing,
+            onDismiss = { editingTask = null },
+            onSave = {
+                editingTask = null
+                state.upsertTask(it)
+            },
+            onDelete = {
+                state.deleteTask(editing.id)
+                editingTask = null
+            }
         )
     }
 }

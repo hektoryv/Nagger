@@ -117,15 +117,31 @@ object Placer {
         durationMinutes: Int,
         dayShape: DayShape,
         busy: List<ScheduledBlock>
+    ): Pair<LocalDateTime, LocalDateTime>? =
+        findSlotFrom(LocalDateTime.of(day, dayShape.dayStart), day, durationMinutes, dayShape, busy)
+
+    /**
+     * Same search as [findSlot], but starting the search at [searchFrom] instead of
+     * the start of the day (clamped to not start before [DayShape.dayStart] either
+     * way). Used to push a displaced task to the next free slot right after wherever
+     * it just got bumped from, rather than back to the earliest gap in the whole day.
+     */
+    internal fun findSlotFrom(
+        searchFrom: LocalDateTime,
+        day: LocalDate,
+        durationMinutes: Int,
+        dayShape: DayShape,
+        busy: List<ScheduledBlock>
     ): Pair<LocalDateTime, LocalDateTime>? {
-        val dayStart = LocalDateTime.of(day, dayShape.dayStart)
         val windDown = LocalDateTime.of(day, dayShape.windDownStart)
         val dinnerStart = LocalDateTime.of(day, dayShape.dinnerStart)
         val dinnerEnd = LocalDateTime.of(day, dayShape.dinnerEnd)
+        var cursor = maxOf(searchFrom, LocalDateTime.of(day, dayShape.dayStart))
 
-        val blockers = (busy.map { it.start to it.end } + (dinnerStart to dinnerEnd)).sortedBy { it.first }
+        val blockers = (busy.map { it.start to it.end } + (dinnerStart to dinnerEnd))
+            .filter { it.second > cursor }
+            .sortedBy { it.first }
 
-        var cursor = dayStart
         for ((busyStart, busyEnd) in blockers) {
             if (busyStart > cursor) {
                 val gapEnd = minOf(busyStart, windDown)

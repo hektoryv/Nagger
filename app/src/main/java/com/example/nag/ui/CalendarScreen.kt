@@ -1,5 +1,8 @@
 package com.example.nag.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -63,6 +68,7 @@ import com.example.nag.planner.BlockKind
 import com.example.nag.planner.DayShape
 import com.example.nag.planner.LockState
 import com.example.nag.planner.OccurrenceKey
+import com.example.nag.planner.PlannerTask
 import com.example.nag.planner.ScheduledBlock
 import com.example.nag.planner.TaskRecurrence
 import java.time.DayOfWeek
@@ -89,6 +95,7 @@ fun CalendarScreen(
     }
     var selected by remember { mutableStateOf<LocalDate?>(null) }
     var selectedBlock by remember { mutableStateOf<ScheduledBlock?>(null) }
+    var editingTask by remember { mutableStateOf<PlannerTask?>(null) }
 
     Column(
         Modifier
@@ -156,7 +163,29 @@ fun CalendarScreen(
                     state.moveTaskAssignment(block.occurrenceKey.sourceId, newStart)
                     selectedBlock = null
                 }
+            } else null,
+            onEdit = if (block.kind == BlockKind.TASK) {
+                {
+                    editingTask = state.plannerTasks.firstOrNull { it.id == block.occurrenceKey.sourceId }
+                    selectedBlock = null
+                }
             } else null
+        )
+    }
+
+    val editing = editingTask
+    if (editing != null) {
+        TaskDialog(
+            existing = editing,
+            onDismiss = { editingTask = null },
+            onSave = {
+                editingTask = null
+                state.upsertTask(it)
+            },
+            onDelete = {
+                state.deleteTask(editing.id)
+                editingTask = null
+            }
         )
     }
 }
@@ -400,8 +429,9 @@ private fun WeekTimeline(
  * Hold-and-drag to move a flexible task: a normal tap still opens the detail dialog,
  * but a long-press-then-drag (only wired up for movable blocks — see [isMovableTask])
  * slides the block anywhere in the week grid — a new time, a new day, or both —
- * snapping to the nearest 15 minutes and nearest day column on release. Dims while
- * dragging for feedback.
+ * snapping to the nearest 15 minutes and nearest day column on release. Dims and
+ * jiggles side to side while dragging, like an app icon in jiggle mode, and goes
+ * still the moment it's dropped or the drag is cancelled.
  */
 @Composable
 private fun ScheduledBlockView(
@@ -435,11 +465,26 @@ private fun ScheduledBlockView(
     var dragOffsetY by remember(block.occurrenceKey) { mutableStateOf(0f) }
     var dragging by remember(block.occurrenceKey) { mutableStateOf(false) }
 
+    // A small held-down wiggle, like an app icon in jiggle mode: shakes while dragging,
+    // settles back to still the moment it's dropped or the drag is cancelled.
+    val shakeAngle = remember(block.occurrenceKey) { Animatable(0f) }
+    LaunchedEffect(dragging) {
+        if (dragging) {
+            while (true) {
+                shakeAngle.animateTo(2.5f, tween(90, easing = LinearEasing))
+                shakeAngle.animateTo(-2.5f, tween(90, easing = LinearEasing))
+            }
+        } else {
+            shakeAngle.animateTo(0f, tween(100))
+        }
+    }
+
     Box(
         Modifier
             .width(with(density) { columnWidthPx.toDp() })
             .height(blockHeight)
             .offset { IntOffset((leftPx + dragOffsetX).roundToInt(), (topPx + dragOffsetY).roundToInt()) }
+            .graphicsLayer { rotationZ = shakeAngle.value }
             .padding(horizontal = 1.dp, vertical = 0.5.dp)
             .clip(RoundedCornerShape(3.dp))
             .background(MaterialTheme.colorScheme.secondaryContainer)

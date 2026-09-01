@@ -41,7 +41,8 @@ fun ScheduledBlockDialog(
     onSetLockState: ((LockState?) -> Unit)? = null,
     isDone: Boolean = false,
     onToggleDone: (() -> Unit)? = null,
-    onMove: ((LocalDateTime) -> Unit)? = null
+    onMove: ((LocalDateTime) -> Unit)? = null,
+    onEdit: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     AlertDialog(
@@ -74,6 +75,13 @@ fun ScheduledBlockDialog(
                     Spacer(Modifier.height(8.dp))
                     TextButton(onClick = onToggleDone) {
                         Text(if (isDone) "Mark not done" else "Mark done")
+                    }
+                }
+
+                if (onEdit != null) {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onEdit) {
+                        Text("Edit task")
                     }
                 }
 

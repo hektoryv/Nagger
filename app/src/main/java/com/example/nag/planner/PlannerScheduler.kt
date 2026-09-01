@@ -61,9 +61,11 @@ object PlannerScheduler {
      * Pins a one-off task's already-placed occurrence to a new start time (any date —
      * this is also how a drag across days lands), without re-running the placer for
      * everything. Any other already-placed one-off task the move now overlaps gets
-     * pushed to the next free slot that same day, same as the placer would have found
-     * it a spot originally; a locked event is never pushed, and if no free slot exists
-     * the pushed task is left overlapping rather than losing its placement entirely.
+     * pushed forward to the next free slot right after it, same day — the closest
+     * spot into the future, not just whatever's earliest in the day — falling back to
+     * the first free slot anywhere that day if nothing later fits. A locked event is
+     * never pushed, and if no free slot exists at all the pushed task is left
+     * overlapping rather than losing its placement entirely.
      */
     fun moveTaskAssignment(
         context: Context,
@@ -106,7 +108,11 @@ object PlannerScheduler {
             val busy = dayEvents + assignments.values.filter {
                 it.occurrenceKey.sourceId != otherId && it.start.toLocalDate() == date
             }
-            val slot = Placer.findSlot(date, otherDuration, dayShape, busy)
+            // Prefer the next free slot right after the block that just displaced it
+            // (closest, and pushes forward into the rest of the day) — only fall back
+            // to the first free slot anywhere that day if nothing later fits.
+            val slot = Placer.findSlotFrom(newEnd, date, otherDuration, dayShape, busy)
+                ?: Placer.findSlot(date, otherDuration, dayShape, busy)
             if (slot != null) {
                 assignments[otherId] = other.copy(
                     occurrenceKey = OccurrenceKey(otherId, slot.first.toLocalDate()),
