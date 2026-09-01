@@ -3,6 +3,7 @@ package com.example.nag.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,15 +38,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nag.data.DayStatus
@@ -61,10 +66,12 @@ import com.example.nag.planner.TaskRecurrence
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -285,6 +292,8 @@ private fun WeekGrid(
                     completions = state.plannerCompletions,
                     dayShape = state.dayShape,
                     onBlockClick = onBlockClick,
+                    isMovable = { block -> isMovableTask(state, block) },
+                    onBlockMove = { block, newStart -> state.moveTaskAssignment(block.occurrenceKey.sourceId, newStart) },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -314,6 +323,8 @@ private fun DayTimelineColumn(
     completions: Set<OccurrenceKey>,
     dayShape: DayShape,
     onBlockClick: (ScheduledBlock) -> Unit,
+    isMovable: (ScheduledBlock) -> Boolean,
+    onBlockMove: (ScheduledBlock, LocalDateTime) -> Unit,
     modifier: Modifier
 ) {
     val totalHours = TIMELINE_END_HOUR - TIMELINE_START_HOUR
@@ -348,31 +359,95 @@ private fun DayTimelineColumn(
             }
     ) {
         blocks.forEach { block ->
-            ScheduledBlockView(block, isDone = block.occurrenceKey in completions, onClick = { onBlockClick(block) })
+            ScheduledBlockView(
+                block,
+                isDone = block.occurrenceKey in completions,
+                isMovable = isMovable(block),
+                onClick = { onBlockClick(block) },
+                onMove = { newStart -> onBlockMove(block, newStart) }
+            )
         }
     }
 }
 
+/**
+ * Hold-and-drag to move a flexible task: a normal tap still opens the detail dialog,
+ * but a long-press-then-drag (only wired up for movable blocks — see [isMovableTask])
+ * slides the block up/down within the same day and snaps to the nearest 15 minutes on
+ * release. Dragging across days isn't supported, only within the day it's already on.
+ */
 @Composable
-private fun ScheduledBlockView(block: ScheduledBlock, isDone: Boolean, onClick: () -> Unit) {
+private fun ScheduledBlockView(
+    block: ScheduledBlock,
+    isDone: Boolean,
+    isMovable: Boolean,
+    onClick: () -> Unit,
+    onMove: (LocalDateTime) -> Unit
+) {
+    val density = LocalDensity.current
+    val totalMinutes = (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * 60
     val startMinutes = ((block.start.hour - TIMELINE_START_HOUR) * 60 + block.start.minute)
-        .coerceIn(0, (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * 60)
-    val top = HOUR_HEIGHT * (startMinutes / 60f)
-    val durationHours = (Duration.between(block.start, block.end).toMinutes() / 60f).coerceAtLeast(0.25f)
+        .coerceIn(0, totalMinutes)
+    val durationMinutes = Duration.between(block.start, block.end).toMinutes().toInt()
+    val durationHours = (durationMinutes / 60f).coerceAtLeast(0.25f)
     val blockHeight = HOUR_HEIGHT * durationHours
     val borderColor = if (block.lockState == LockState.LOCKED)
         MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline
+
+    val hourPx = with(density) { HOUR_HEIGHT.toPx() }
+    val topPx = startMinutes / 60f * hourPx
+    val blockHeightPx = with(density) { blockHeight.toPx() }
+    val timelineHeightPx = totalMinutes / 60f * hourPx
+    val maxTopPx = (timelineHeightPx - blockHeightPx).coerceAtLeast(0f)
+
+    var dragOffsetPx by remember(block.occurrenceKey) { mutableStateOf(0f) }
+    var dragging by remember(block.occurrenceKey) { mutableStateOf(false) }
 
     Box(
         Modifier
             .fillMaxWidth()
             .height(blockHeight)
-            .offset(y = top)
+            .offset { IntOffset(0, (topPx + dragOffsetPx).roundToInt()) }
             .padding(horizontal = 1.dp, vertical = 0.5.dp)
             .clip(RoundedCornerShape(3.dp))
             .background(MaterialTheme.colorScheme.secondaryContainer)
             .border(1.dp, borderColor, RoundedCornerShape(3.dp))
+            .alpha(if (dragging) 0.7f else 1f)
             .clickable(onClick = onClick)
+            .then(
+                if (isMovable) {
+                    Modifier.pointerInput(block.occurrenceKey) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { dragging = true },
+                            onDragEnd = {
+                                dragging = false
+                                val draggedMinutes = (dragOffsetPx / hourPx * 60f).roundToInt()
+                                val snapped = (draggedMinutes / 15f).roundToInt() * 15
+                                val minMinuteOfDay = TIMELINE_START_HOUR * 60
+                                val maxMinuteOfDay = (TIMELINE_END_HOUR * 60 - durationMinutes)
+                                    .coerceAtLeast(minMinuteOfDay)
+                                val actualStartMinuteOfDay = block.start.hour * 60 + block.start.minute
+                                val proposed = actualStartMinuteOfDay + snapped
+                                val clamped = proposed.coerceIn(minMinuteOfDay, maxMinuteOfDay)
+                                dragOffsetPx = 0f
+                                onMove(
+                                    LocalDateTime.of(block.start.toLocalDate(), LocalTime.of(clamped / 60, clamped % 60))
+                                )
+                            },
+                            onDragCancel = {
+                                dragging = false
+                                dragOffsetPx = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                dragOffsetPx = (dragOffsetPx + dragAmount.y).coerceIn(-topPx, maxTopPx - topPx)
+                            }
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .padding(horizontal = 2.dp, vertical = 1.dp)
     ) {
         Text(
