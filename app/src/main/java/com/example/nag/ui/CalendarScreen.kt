@@ -39,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -411,15 +412,22 @@ private fun WeekTimeline(
         schedule.forEach { block ->
             val dayIndex = (block.start.toLocalDate().toEpochDay() - weekStart.toEpochDay()).toInt()
             if (dayIndex in 0..6) {
-                ScheduledBlockView(
-                    block = block,
-                    dayIndex = dayIndex,
-                    columnWidthPx = columnWidthPx,
-                    isDone = block.occurrenceKey in completions,
-                    isMovable = isMovable(block),
-                    onClick = { onBlockClick(block) },
-                    onMove = { newStart -> onBlockMove(block, newStart) }
-                )
+                // Keyed by identity, not list position: `schedule` is sorted by start
+                // time, so a move can reorder it on every recomposition. Without this,
+                // Compose tracks each child by its slot in the list rather than which
+                // block it actually is, which is what made a moved block intermittently
+                // render with another block's stale position/drag state or vanish.
+                key(block.occurrenceKey) {
+                    ScheduledBlockView(
+                        block = block,
+                        dayIndex = dayIndex,
+                        columnWidthPx = columnWidthPx,
+                        isDone = block.occurrenceKey in completions,
+                        isMovable = isMovable(block),
+                        onClick = { onBlockClick(block) },
+                        onMove = { newStart -> onBlockMove(block, newStart) }
+                    )
+                }
             }
         }
     }

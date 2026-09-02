@@ -12,9 +12,9 @@ that adds, renames, or removes a user-facing control.** "User-facing control" me
 anything a real tap/screen touches — a button, a field, a menu item, a section of a
 screen — not internal refactors.
 
-Last updated: after forward-preferring push-away, an Edit action on the block dialog,
-and a drag shake animation (commit history around `9000053` and the fixes that follow
-it).
+Last updated: after fixing intermittent block rendering with an explicit Compose
+`key()` in the week timeline, following device testing (commit history around
+`9000053` and the fixes that follow it).
 
 ---
 
@@ -192,20 +192,19 @@ it won't show a one-off task somewhere different than the app does.
 
 ## Known gaps (confirmed by reading the code, not memory — check off as fixed)
 
-- **Moving a task only exists for one-off tasks** — a recurring task's occurrence has
-  no persisted slot to move at all, whether by drag or by the dialog button (see "How
-  the schedule stays current").
+- **Moving a block only exists for one-off tasks** — a class made flexible via "Make
+  flexible" still can't be dragged or moved to a specific time afterward, and a
+  recurring task's occurrence has no persisted slot to move at all either. Both are
+  reported gaps (2026-09-01 device testing) — see "How the schedule stays current".
+  `isMovableTask` in both `CalendarScreen.kt` and `TodayScreen.kt` is the gate to
+  widen once this is picked up.
+- **A newly added task can land earlier today than the current clock time** — `minDate`
+  in `Placer`/`PlannerScheduler` only keeps a one-off task off days before today, not
+  off times before *now* on today itself, so a task added at 15:00 can still get
+  auto-placed at 09:00 the same day. Reported 2026-09-01, not yet fixed.
 - **Push-away doesn't account for recurring task occurrences**, only other one-off
   tasks — a recurring task can still silently overlap a task that was just dragged
   onto it. Locked events are never pushed (correct — they shouldn't move).
-- **Not yet verified on a real device** — the drag gesture, the shake animation while
-  held, and the forward-preferring push-away were all written and reviewed carefully
-  but the sandbox this was built in can't run the app to confirm the feel: whether the
-  drag still fights the screen's vertical scroll, whether it's stable when dropped
-  onto another block (an earlier round of this had the moved block appear to revert —
-  push-away now searches from right after the moved block's new end time instead of
-  from the start of the day, which should be steadier, but say if it still looks off),
-  or whether the shake reads as "currently held" rather than as jitter.
 - **Dinner/wind-down aren't adjustable by long-pressing them directly in the week
   view**, as originally asked for — they're a global setting, changed instead through
   the menu-based **Day shape** dialog (a per-day-instance long-press would be a
@@ -227,3 +226,11 @@ it won't show a one-off task somewhere different than the app does.
   its caller is keyed on, while the caller is computing, is a self-referential trap
   that left the week view stuck on a stale render. Fixed by making `plannerSchedule()`
   a pure read; every actual mutation already updated the field itself independently.
+- **A moved block would then intermittently render fine or not at all** on later
+  recompositions (reported after device testing of the above fix). Root cause: the
+  week timeline's `schedule.forEach { block -> ScheduledBlockView(...) }` had no
+  explicit `key()`, so Compose tracked each block's composable by its position in the
+  list rather than by which block it actually was — and `schedule` is sorted by start
+  time, so a move reorders the list on every recomposition, letting a block's
+  position pick up another block's stale drag offset/position or drop out entirely.
+  Fixed by wrapping each block in `key(block.occurrenceKey) { ... }`.
