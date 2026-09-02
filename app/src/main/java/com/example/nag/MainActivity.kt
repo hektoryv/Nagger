@@ -15,6 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -26,7 +27,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +43,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -52,10 +54,15 @@ import com.example.nag.notify.Scheduler
 import com.example.nag.ui.AmountDialog
 import com.example.nag.ui.AppState
 import com.example.nag.ui.CalendarScreen
+import com.example.nag.ui.DayShapeDialog
 import com.example.nag.ui.DetailScreen
 import com.example.nag.ui.HabitDialog
+import com.example.nag.ui.PlannerLinkDialog
 import com.example.nag.ui.PromptDialog
+import com.example.nag.ui.TaskDialog
+import com.example.nag.ui.TasksScreen
 import com.example.nag.ui.TodayScreen
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 class MainActivity : ComponentActivity() {
@@ -102,6 +109,7 @@ private enum class Tab { TODAY, CALENDAR }
 fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit) {
     val context = LocalContext.current
     val today = LocalDate.now()
+    val coroutineScope = rememberCoroutineScope()
 
     var tab by remember { mutableStateOf(Tab.TODAY) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -109,6 +117,10 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
     var creating by remember { mutableStateOf(false) }
     var amountFor by remember { mutableStateOf<Habit?>(null) }
     var detailId by remember { mutableStateOf<String?>(null) }
+    var plannerLinkOpen by remember { mutableStateOf(false) }
+    var taskCreating by remember { mutableStateOf(false) }
+    var tasksScreenOpen by remember { mutableStateOf(false) }
+    var dayShapeOpen by remember { mutableStateOf(false) }
 
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -118,6 +130,11 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    // Syncs on first open (if a link is already saved) and again whenever it's changed.
+    LaunchedEffect(state.plannerFeedUrl) {
+        if (state.plannerFeedUrl != null) state.syncPlanner()
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -166,6 +183,12 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
             onEdit = { editing = detail }
         )
         EditingDialogs(state, today, editing, { editing = it }, amountFor, { amountFor = it })
+        return
+    }
+
+    if (tasksScreenOpen) {
+        BackHandler { tasksScreenOpen = false }
+        TasksScreen(state = state, onBack = { tasksScreenOpen = false })
         return
     }
 
@@ -228,6 +251,49 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
                                 importLauncher.launch(arrayOf("*/*"))
                             }
                         )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    state.plannerFeedUrl?.let { "Class schedule link" }
+                                        ?: "Add class schedule link"
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                plannerLinkOpen = true
+                            }
+                        )
+                        if (state.plannerFeedUrl != null) {
+                            DropdownMenuItem(
+                                text = { Text(if (state.plannerSyncing) "Syncing…" else "Sync class schedule now") },
+                                enabled = !state.plannerSyncing,
+                                onClick = {
+                                    menuOpen = false
+                                    coroutineScope.launch { state.syncPlanner() }
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Manage tasks") },
+                            onClick = {
+                                menuOpen = false
+                                tasksScreenOpen = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Day shape") },
+                            onClick = {
+                                menuOpen = false
+                                dayShapeOpen = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Recalculate schedule") },
+                            onClick = {
+                                menuOpen = false
+                                state.recalculatePlanner(today)
+                            }
+                        )
                     }
                 }
             )
@@ -249,9 +315,30 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
             }
         },
         floatingActionButton = {
-            if (tab == Tab.TODAY) {
-                FloatingActionButton(onClick = { creating = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add a check-in")
+            // Same choice on both tabs — the Today screen now shows planner tasks too,
+            // so "add task" belongs here just as much as "add check-in" does.
+            var fabMenuOpen by remember { mutableStateOf(false) }
+            Box {
+                ExtendedFloatingActionButton(
+                    onClick = { fabMenuOpen = true },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("Add") }
+                )
+                DropdownMenu(expanded = fabMenuOpen, onDismissRequest = { fabMenuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Add check-in") },
+                        onClick = {
+                            fabMenuOpen = false
+                            creating = true
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add task") },
+                        onClick = {
+                            fabMenuOpen = false
+                            taskCreating = true
+                        }
+                    )
                 }
             }
         }
@@ -294,6 +381,44 @@ fun NagApp(state: AppState, promptHabitId: String?, onPromptHandled: () -> Unit)
     }
 
     EditingDialogs(state, today, editing, { editing = it }, amountFor, { amountFor = it })
+
+    if (taskCreating) {
+        TaskDialog(
+            onDismiss = { taskCreating = false },
+            onSave = {
+                taskCreating = false
+                state.upsertTask(it)
+            }
+        )
+    }
+
+    if (dayShapeOpen) {
+        DayShapeDialog(
+            existing = state.dayShape,
+            onDismiss = { dayShapeOpen = false },
+            onSave = {
+                dayShapeOpen = false
+                state.applyDayShape(it)
+            }
+        )
+    }
+
+    if (plannerLinkOpen) {
+        PlannerLinkDialog(
+            existing = state.plannerFeedUrl,
+            syncing = state.plannerSyncing,
+            error = state.plannerSyncError,
+            onDismiss = { plannerLinkOpen = false },
+            onSave = { url ->
+                plannerLinkOpen = false
+                state.setFeedUrl(url)
+            },
+            onRemove = {
+                plannerLinkOpen = false
+                state.setFeedUrl(null)
+            }
+        )
+    }
 
     // Landed here from a notification or a widget row: ask straight out.
     val prompted = promptHabitId?.let { id -> state.habits.firstOrNull { it.id == id } }

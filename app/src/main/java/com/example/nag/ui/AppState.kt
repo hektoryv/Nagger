@@ -10,8 +10,20 @@ import com.example.nag.data.Store
 import com.example.nag.logic.Schedule
 import com.example.nag.notify.Notifications
 import com.example.nag.notify.Scheduler
+import com.example.nag.planner.DayShape
+import com.example.nag.planner.LockState
+import com.example.nag.planner.OccurrenceKey
+import com.example.nag.planner.PlannerOverrides
+import com.example.nag.planner.PlannerScheduler
+import com.example.nag.planner.PlannerStore
+import com.example.nag.planner.PlannerSync
+import com.example.nag.planner.PlannerTask
+import com.example.nag.planner.ScheduledBlock
 import com.example.nag.widget.NagWidget
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.temporal.TemporalAdjusters
 
 /**
  * Single source of truth for the UI. Every write goes through here, which is also
@@ -31,11 +43,45 @@ class AppState(private val context: Context) {
     var backupFolder by mutableStateOf(Backup.folderLabel(context))
         private set
 
+    var plannerFeedUrl by mutableStateOf(PlannerStore.loadFeedUrl(context))
+        private set
+
+    var plannerEvents by mutableStateOf(PlannerStore.loadEvents(context))
+        private set
+
+    var plannerTasks by mutableStateOf(PlannerStore.loadTasks(context))
+        private set
+
+    var plannerOverrides by mutableStateOf(PlannerStore.loadOverrides(context))
+        private set
+
+    var plannerCompletions by mutableStateOf(PlannerStore.loadCompletions(context))
+        private set
+
+    var plannerTaskAssignments by mutableStateOf(PlannerStore.loadTaskAssignments(context))
+        private set
+
+    var plannerSyncing by mutableStateOf(false)
+        private set
+
+    var plannerSyncError by mutableStateOf<String?>(null)
+        private set
+
+    var dayShape by mutableStateOf(PlannerStore.loadDayShape(context))
+        private set
+
     fun reload() {
         habits = Store.loadHabits(context)
         log = Store.loadLog(context)
         reminder = Store.reminderTime(context)
         backupFolder = Backup.folderLabel(context)
+        plannerFeedUrl = PlannerStore.loadFeedUrl(context)
+        plannerEvents = PlannerStore.loadEvents(context)
+        plannerTasks = PlannerStore.loadTasks(context)
+        plannerOverrides = PlannerStore.loadOverrides(context)
+        plannerCompletions = PlannerStore.loadCompletions(context)
+        plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
+        dayShape = PlannerStore.loadDayShape(context)
     }
 
     private fun afterChange() {
@@ -90,4 +136,127 @@ class AppState(private val context: Context) {
 
     fun dueToday(today: LocalDate): List<Habit> =
         habits.filter { Schedule.isDueOn(it, today, log) }
+
+    // ---------- planner ----------
+
+    fun setFeedUrl(url: String?) {
+        val cleaned = url?.trim()?.ifBlank { null }
+        PlannerStore.saveFeedUrl(context, cleaned)
+        plannerFeedUrl = cleaned
+        if (cleaned == null) {
+            // No source left for these, so don't leave stale classes behind.
+            plannerEvents = emptyList()
+            PlannerStore.saveEvents(context, emptyList())
+        }
+    }
+
+    /** Fetches and parses the feed, then persists whatever it got. Call from a coroutine. */
+    suspend fun syncPlanner() {
+        val url = plannerFeedUrl ?: return
+        plannerSyncing = true
+        plannerSyncError = null
+        PlannerSync.sync(url)
+            .onSuccess { events ->
+                plannerEvents = events
+                PlannerStore.saveEvents(context, events)
+            }
+            .onFailure { error ->
+                plannerSyncError = error.message ?: "Couldn't reach the schedule link"
+            }
+        plannerSyncing = false
+    }
+
+    fun upsertTask(task: PlannerTask) {
+        val isEdit = plannerTasks.any { it.id == task.id }
+        val updated = if (isEdit) plannerTasks.map { if (it.id == task.id) task else it }
+        else plannerTasks + task
+        PlannerStore.saveTasks(context, updated)
+        plannerTasks = updated
+        // The old placement may no longer fit (duration/deadline changed), so let it be
+        // decided again — respecting the same "never before today" rule as a new task.
+        if (isEdit) {
+            PlannerStore.clearTaskAssignment(context, task.id)
+            plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
+        }
+    }
+
+    fun deleteTask(id: String) {
+        val updated = plannerTasks.filterNot { it.id == id }
+        PlannerStore.saveTasks(context, updated)
+        plannerTasks = updated
+        PlannerStore.clearTaskAssignment(context, id)
+        plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
+    }
+
+    /** Skip this occurrence, or make it flexible so the placer can move it — events only for now. */
+    fun setOverride(key: OccurrenceKey, lockState: LockState) {
+        val updated = plannerOverrides + (key to lockState)
+        PlannerStore.saveOverrides(context, updated)
+        plannerOverrides = updated
+    }
+
+    /** Back to whatever the source's default lock state is. */
+    fun clearOverride(key: OccurrenceKey) {
+        val updated = plannerOverrides - key
+        PlannerStore.saveOverrides(context, updated)
+        plannerOverrides = updated
+    }
+
+    /** Marks one task occurrence done or not. Doesn't affect future placement (see docs/FEATURES.md). */
+    fun setTaskOccurrenceDone(key: OccurrenceKey, done: Boolean) {
+        val updated = if (done) plannerCompletions + key else plannerCompletions - key
+        PlannerStore.saveCompletions(context, updated)
+        plannerCompletions = updated
+    }
+
+    /**
+     * Locked events plus whatever the placer fits the flexible tasks around them. Goes
+     * through [PlannerScheduler] rather than calling [Placer] directly so a one-off
+     * task, once placed, stays on the day it was placed rather than being re-decided
+     * every time a different week is viewed.
+     *
+     * Deliberately does NOT touch [plannerTaskAssignments] here: this is called from
+     * inside a Compose `remember(..., state.plannerTaskAssignments, ...)` block, and a
+     * function writing the very state its caller is keyed on, while that caller is
+     * computing, is a self-referential trap — it left the week view stuck showing a
+     * stale position after a move until something unrelated (switching tabs) forced a
+     * full recomposition. Every actual mutation (move/recalculate/edit/delete) already
+     * updates the field itself; this function only needs to read, not write.
+     */
+    fun plannerSchedule(weekStart: LocalDate, today: LocalDate): List<ScheduledBlock> =
+        PlannerScheduler.schedule(
+            context, weekStart, today, plannerEvents, plannerTasks, PlannerOverrides(plannerOverrides), dayShape
+        )
+
+    /** Just [date]'s slice of its week's schedule — what the Today screen shows. [date] is today. */
+    fun plannerScheduleForDay(date: LocalDate): List<ScheduledBlock> {
+        val weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        return plannerSchedule(weekStart, today = date).filter { it.start.toLocalDate() == date }
+    }
+
+    /** Forgets every not-yet-past one-off placement so the next view re-decides them from scratch. */
+    fun recalculatePlanner(today: LocalDate) {
+        PlannerScheduler.recalculate(context, today)
+        plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
+    }
+
+    /** The dialog validates the shape before calling this, so it's just persist-and-apply here. */
+    fun applyDayShape(newShape: DayShape) {
+        PlannerStore.saveDayShape(context, newShape)
+        dayShape = newShape
+        NagWidget.refresh(context)
+    }
+
+    /**
+     * Pins an already-placed one-off task to a new day/time the user chose (by dialog
+     * or by drag), without re-running the placer. Pushes any other one-off task it now
+     * overlaps to a free slot the same day.
+     */
+    fun moveTaskAssignment(taskId: String, newStart: LocalDateTime) {
+        val duration = plannerTasks.firstOrNull { it.id == taskId }?.durationMinutes ?: return
+        PlannerScheduler.moveTaskAssignment(
+            context, taskId, newStart, duration, plannerEvents, PlannerOverrides(plannerOverrides), dayShape
+        )
+        plannerTaskAssignments = PlannerStore.loadTaskAssignments(context)
+    }
 }

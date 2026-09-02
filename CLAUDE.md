@@ -8,6 +8,13 @@ A personal Android habit-reminder app called Nag, built for one user, distribute
 sideloaded APK. It asks "Did you do pull-ups?" at 23:00 and keeps asking about things
 that get postponed. There is no Play Store listing, no other users, no analytics.
 
+It also has a second feature, "the everything planner": a Calendar tab that imports a
+school ICS feed (locked class blocks) and auto-schedules flexible tasks around them
+with a simple greedy heuristic — deliberately not a constraint solver. See
+`docs/PLANNER_SPEC.md` for the original design and the "Architecture" section below
+for how it's actually built. `docs/FEATURES.md`'s "Known gaps" section is the current
+punch list for this feature — check it before assuming something is finished.
+
 The owner uses it daily on a Samsung-family Android phone with a Swedish locale. He
 installs updates through Obtainium, which watches this repo's GitHub Releases.
 
@@ -22,6 +29,12 @@ installs updates through Obtainium, which watches this repo's GitHub Releases.
 - When something breaks, diagnose the actual cause rather than guessing. Past bugs had
   precise causes worth finding: an `unzip` exit code 9 meant a missing file, not a
   corrupt zip.
+- Before touching any screen, dialog, or menu, read `docs/FEATURES.md` — the running
+  inventory of every user-facing control that currently exists. Update it in the same
+  commit as any change that adds, renames, or removes one. This exists because a
+  feature can go missing without a single line being deleted: data gets saved
+  correctly but nothing in the UI ever shows it again. Check `docs/FEATURES.md`'s
+  "Known gaps" section before reporting a task done.
 
 ## Build and release pipeline
 
@@ -71,14 +84,48 @@ app/src/main/java/com/example/nag/
   data/                Habit, Entry, JSON, SharedPreferences storage, backup
   logic/Schedule.kt    every date calculation in the app
   notify/              alarm scheduling, notifications, broadcast receivers
-  ui/                  Compose screens, canvas chart, dialogs
-  widget/              home screen widget (RemoteViews, not Glance)
-app/src/test/java/     JVM unit tests for the schedule engine
+  planner/             the everything-planner: ICS import, task model, the
+                        greedy placer, and the persisted-assignment layer on top
+                        of it (see below)
+  ui/                  Compose screens, canvas chart, dialogs — habit screens
+                        (Today, Detail) and planner screens (Calendar, Tasks)
+  widget/              home screen widget (RemoteViews, not Glance) — shows
+                        both habits and today's planner schedule
+app/src/test/java/     JVM unit tests for the schedule engine and the placer
 ```
 
-**`data` and `logic` deliberately avoid Compose and nearly all Android types.** That
-keeps the scheduling rules testable on the JVM without an emulator. Preserve this. If
-something in `logic` needs a `Context`, the design has gone wrong — pass the data in.
+**`data`, `logic`, and `planner` deliberately avoid Compose and nearly all Android
+types** (the one exception is `planner/PlannerStore.kt`, which needs `Context` for
+SharedPreferences, same as `data/Store.kt`). That keeps the scheduling rules testable
+on the JVM without an emulator. Preserve this. If something in `logic` or the
+non-storage parts of `planner` needs a `Context`, the design has gone wrong — pass the
+data in.
+
+### The everything-planner, briefly
+
+- `PlannerEvent` (from the ICS feed) and `PlannerTask` (user-entered) are the two
+  input types. `Placer.place(weekStart, ...)` is the greedy algorithm: it's a **pure,
+  stateless function of one week** — call it again with the same inputs and it makes
+  the same placement decision, with no memory of any other call.
+- That statelessness is exactly what caused a real bug: called independently by the
+  Calendar screen (per navigated week), the Today screen, and the widget, a one-off
+  task got re-decided into a different day by each caller, including days already in
+  the past. `PlannerScheduler` exists solely to fix this: it wraps `Placer` with a
+  persisted record (`PlannerStore`'s task-assignments store) of where each one-off
+  task has already landed, so it's decided once and never before today. **Always go
+  through `PlannerScheduler`/`AppState.plannerSchedule(...)`, never call `Placer`
+  directly from UI code.** Recurring tasks (daily / times-a-week) are the exception —
+  they're recomputed fresh every week on purpose, since they're meant to recur.
+- Moving a block (drag or the "Move to a specific time" dialog) only exists for
+  one-off tasks today, because only they have a persisted assignment to move. A class
+  made flexible, or a recurring task's occurrence, has nothing to pin yet — a real gap,
+  tracked in `docs/FEATURES.md`.
+- **Any Compose list of `ScheduledBlock`s must use `key(block.occurrenceKey)`.** The
+  week timeline's block list is sorted by start time, so a move reorders it on every
+  recomposition; without an explicit key Compose tracks each block by its position in
+  the list rather than by which block it is, which caused blocks to intermittently
+  render with another block's stale state or not render at all. This already bit us
+  once — don't reintroduce a keyless `forEach` over a re-sortable block list.
 
 ### Invariants worth protecting
 
@@ -145,6 +192,13 @@ Ideas raised and deliberately deferred, roughly in the order they seemed worth d
 - Notes attached to an entry.
 - Snooze durations other than one hour.
 - An in-app "check for updates" button (Obtainium covers this).
+- Interpersonal/shared scheduling (seeing when two people are both free) for the
+  planner — explicitly deferred indefinitely, not just "not yet".
+- Splitting a long task across multiple free gaps in a day. The placer only ever
+  looks for one contiguous block, so e.g. a 5-hour task can end up only fitting on a
+  weekend. Traced and confirmed this is the greedy design working as intended, not a
+  bug — fixing it would mean becoming more of a solver, a deliberate trade-off to
+  revisit only on purpose.
 
 ## User-facing behaviour that is intentional, not a bug
 

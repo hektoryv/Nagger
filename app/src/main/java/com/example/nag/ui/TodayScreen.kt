@@ -22,6 +22,10 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,7 +36,12 @@ import androidx.compose.ui.unit.sp
 import com.example.nag.data.Habit
 import com.example.nag.data.habitColorArgb
 import com.example.nag.logic.Schedule
+import com.example.nag.planner.BlockKind
+import com.example.nag.planner.PlannerTask
+import com.example.nag.planner.ScheduledBlock
+import com.example.nag.planner.TaskRecurrence
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,6 +62,9 @@ fun TodayScreen(
     }
     val paused = state.habits.filter { it.paused }
     val finished = state.habits.filter { it.finished }
+    val schedule = state.plannerScheduleForDay(today).sortedBy { it.start }
+    var selectedBlock by remember { mutableStateOf<ScheduledBlock?>(null) }
+    var editingTask by remember { mutableStateOf<PlannerTask?>(null) }
 
     Column(
         Modifier
@@ -68,7 +80,7 @@ fun TodayScreen(
             Column(Modifier.padding(18.dp)) {
                 Text(
                     when {
-                        state.habits.isEmpty() -> "Nothing set up yet"
+                        state.habits.isEmpty() && schedule.isEmpty() -> "Nothing set up yet"
                         due.isEmpty() && doneToday.isEmpty() -> "Nothing due today"
                         due.isEmpty() -> "All clear for today"
                         else -> "${due.size} to do today"
@@ -78,12 +90,27 @@ fun TodayScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    if (state.habits.isEmpty())
+                    if (state.habits.isEmpty() && schedule.isEmpty())
                         "Tap + to add something like \"do pull-ups\"."
                     else
                         "Check-in at %02d:%02d".format(state.reminder.first, state.reminder.second),
                     style = MaterialTheme.typography.bodyMedium
                 )
+            }
+        }
+
+        if (schedule.isNotEmpty()) {
+            SectionLabel("Today's schedule")
+            schedule.forEach { block ->
+                ScheduledBlockRow(
+                    block = block,
+                    isDone = block.occurrenceKey in state.plannerCompletions,
+                    onToggleDone = if (block.kind == BlockKind.TASK) {
+                        { done -> state.setTaskOccurrenceDone(block.occurrenceKey, done) }
+                    } else null,
+                    onClick = { selectedBlock = block }
+                )
+                HorizontalDivider()
             }
         }
 
@@ -132,7 +159,71 @@ fun TodayScreen(
             }
         }
     }
+
+    val block = selectedBlock
+    if (block != null) {
+        ScheduledBlockDialog(
+            block = block,
+            onDismiss = { selectedBlock = null },
+            onDelete = if (block.kind == BlockKind.TASK) {
+                {
+                    state.deleteTask(block.occurrenceKey.sourceId)
+                    selectedBlock = null
+                }
+            } else null,
+            onSetLockState = if (block.kind == BlockKind.EVENT) {
+                { lockState ->
+                    if (lockState == null) state.clearOverride(block.occurrenceKey)
+                    else state.setOverride(block.occurrenceKey, lockState)
+                    selectedBlock = null
+                }
+            } else null,
+            isDone = block.occurrenceKey in state.plannerCompletions,
+            onToggleDone = if (block.kind == BlockKind.TASK) {
+                {
+                    state.setTaskOccurrenceDone(block.occurrenceKey, block.occurrenceKey !in state.plannerCompletions)
+                    selectedBlock = null
+                }
+            } else null,
+            onMove = if (isMovableTask(state, block)) {
+                { newStart ->
+                    state.moveTaskAssignment(block.occurrenceKey.sourceId, newStart)
+                    selectedBlock = null
+                }
+            } else null,
+            onEdit = if (block.kind == BlockKind.TASK) {
+                {
+                    editingTask = state.plannerTasks.firstOrNull { it.id == block.occurrenceKey.sourceId }
+                    selectedBlock = null
+                }
+            } else null
+        )
+    }
+
+    val editing = editingTask
+    if (editing != null) {
+        TaskDialog(
+            existing = editing,
+            onDismiss = { editingTask = null },
+            onSave = {
+                editingTask = null
+                state.upsertTask(it)
+            },
+            onDelete = {
+                state.deleteTask(editing.id)
+                editingTask = null
+            }
+        )
+    }
 }
+
+/**
+ * Only a one-off task has a persisted placement to move — a recurring task's
+ * occurrence is recomputed fresh every week, so there's nothing to pin yet.
+ */
+private fun isMovableTask(state: AppState, block: ScheduledBlock): Boolean =
+    block.kind == BlockKind.TASK &&
+        state.plannerTasks.firstOrNull { it.id == block.occurrenceKey.sourceId }?.recurrence == TaskRecurrence.None
 
 @Composable
 private fun HabitRow(
@@ -191,6 +282,35 @@ private fun PlainRow(
             )
         },
         supportingContent = { Text(supporting) }
+    )
+}
+
+private val ROW_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+@Composable
+private fun ScheduledBlockRow(
+    block: ScheduledBlock,
+    isDone: Boolean,
+    onToggleDone: ((Boolean) -> Unit)?,
+    onClick: () -> Unit
+) {
+    ListItem(
+        modifier = Modifier.clickable { onClick() },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = if (onToggleDone != null) {
+            { Checkbox(checked = isDone, onCheckedChange = onToggleDone) }
+        } else null,
+        headlineContent = {
+            Text(block.title, textDecoration = if (isDone) TextDecoration.LineThrough else null)
+        },
+        supportingContent = {
+            val kind = if (block.kind == BlockKind.EVENT) "Class" else "Task"
+            val bits = buildList {
+                add("$kind · ${block.start.format(ROW_TIME_FORMAT)} – ${block.end.format(ROW_TIME_FORMAT)}")
+                block.deadline?.let { add("due $it") }
+            }
+            Text(bits.joinToString(" · "))
+        }
     )
 }
 
